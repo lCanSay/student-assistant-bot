@@ -4,7 +4,7 @@ from aiogram import Router, F, types
 from aiogram.filters import Command
 from aiogram.types import Message
 from keyboards import get_main_keyboard
-from utils import load_data, search_knowledge_base
+from utils import load_data, search_knowledge_base, search_files
 from ai_service import get_ai_answer
 
 router = Router()
@@ -14,6 +14,7 @@ SCHEDULE_FILE = os.path.join(DATA_DIR, 'schedule.json')
 ROOMS_FILE = os.path.join(DATA_DIR, 'rooms.json')
 CONTACTS_FILE = os.path.join(DATA_DIR, 'contacts.json')
 FAQ_FILE = os.path.join(DATA_DIR, 'faq.json')
+FILES_FILE = os.path.join(DATA_DIR, 'files.json')
 
 @router.message(Command("start"))
 async def cmd_start(message: Message):
@@ -99,11 +100,32 @@ async def show_help(message: Message):
         "Вы также можете задать мне вопрос, и я постараюсь ответить!"
     )
 
+
+@router.message(F.content_type.in_({'document', 'photo'}))
+async def get_file_id_debug(message: Message):
+    # Получаем file_id отправляя боту файл
+    if message.document:
+        file_id = message.document.file_id
+        file_type = "document"
+        name = message.document.file_name
+    elif message.photo:
+        # У фото несколько размеров, берем самый большой (последний)
+        file_id = message.photo[-1].file_id
+        file_type = "photo"
+        name = "photo.jpg"
+    
+    response = (
+        f"📂 **Тип:** `{file_type}`\n"
+        f"🏷 **Имя:** `{name}`\n"
+        f"🆔 **ID:**\n`{file_id}`" 
+    )
+    await message.answer(response, parse_mode="Markdown")
+
 @router.message()
 async def ai_chat_handler(message: Message):
     """
     Catch-all handler for AI chat.
-    Uses RAG (simple keyword search) + Groq API.
+    Uses RAG (simple keyword search) + Groq API + File Sending.
     """
     user_text = message.text or ""
     
@@ -112,10 +134,25 @@ async def ai_chat_handler(message: Message):
     context = search_knowledge_base(user_text, faq_data)
     
     # 2. Get AI Answer
-    # Show typing status could be good, but keeping it simple as per request
     wait_msg = await message.answer("⏳ Думаю...")
-    
     ai_reply = await get_ai_answer(user_text, context)
-    
     await wait_msg.delete()
     await message.answer(ai_reply)
+
+    # 3. Check for files to send
+    files_data = load_data(FILES_FILE)
+    found_files = search_files(user_text, files_data)
+    
+    for file_info in found_files:
+        try:
+            file_id = file_info.get("file_id")
+            caption = file_info.get("caption")
+            file_type = file_info.get("type")
+            
+            if file_type == "document":
+                await message.answer_document(document=file_id, caption=caption)
+            elif file_type == "photo":
+                await message.answer_photo(photo=file_id, caption=caption)
+        except Exception as e:
+            # Silently fail or log error if file_id is invalid to not disrupt the chat
+            print(f"Error sending file {file_info.get('caption')}: {e}")

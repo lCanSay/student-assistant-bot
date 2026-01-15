@@ -31,3 +31,19 @@ def search_knowledge_base(user_message: str, faq_data: List[Dict]) -> str:
                 break # Avoid adding same text multiple times if multiple keywords match
                 
     return "\n\n".join(found_texts)
+
+def search_files(user_message: str, files_data: List[Dict]) -> List[Dict]:
+    """
+    Search for files based on keywords in the user message.
+    """
+    found_files = []
+    message_lower = user_message.lower()
+    
+    for item in files_data:
+        keywords = item.get("keywords", [])
+        for keyword in keywords:
+            if keyword.lower() in message_lower:
+                found_files.append(item)
+                break
+                
+    return found_files
