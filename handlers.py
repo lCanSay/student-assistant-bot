@@ -196,26 +196,33 @@ async def get_file_id_debug(message: Message):
 
 @router.message()
 async def ai_chat_handler(message: Message):
-    """
-    Catch-all handler for AI chat.
-    Uses RAG (simple keyword search) + Groq API + File Sending.
-    """
     user_text = message.text or ""
     
-    # 1. Search Knowledge Base
+    # Search Knowledge Base
     faq_data = load_data(FAQ_FILE)
     context = search_knowledge_base(user_text, faq_data)
     
-    # 2. Get AI Answer
-    wait_msg = await message.answer("⏳ Думаю...")
-    ai_reply = await get_ai_answer(user_text, context)
-    await wait_msg.delete()
-    await message.answer(ai_reply)
-
-    # 3. Check for files to send
+    # Check for files
     files_data = load_data(FILES_FILE)
     found_files = search_files(user_text, files_data)
     
+    # Decision Logic
+    if not context:
+        if found_files:
+            # Files found, but no text context
+            await message.answer("ℹ️ Я нашел файлы по вашему запросу, но текстовой справки у меня пока нет.")
+        else:
+            # Nothing found
+            await message.answer("❌ К сожалению, я пока не знаю ответа на этот вопрос. Попробуйте переформулировать или обратитесь в деканат.")
+            return
+    else:
+        # Context found, query AI
+        wait_msg = await message.answer("⏳ Думаю...")
+        ai_reply = await get_ai_answer(user_text, context)
+        await wait_msg.delete()
+        await message.answer(ai_reply)
+
+    # Send files if found
     for file_info in found_files:
         try:
             file_id = file_info.get("file_id")
@@ -227,5 +234,4 @@ async def ai_chat_handler(message: Message):
             elif file_type == "photo":
                 await message.answer_photo(photo=file_id, caption=caption)
         except Exception as e:
-            # Silently fail or log error if file_id is invalid to not disrupt the chat
             print(f"Error sending file {file_info.get('caption')}: {e}")
