@@ -1,16 +1,14 @@
-import os
 from groq import AsyncGroq
+from config import GROQ_API_KEY
 
 # Initialize the Groq client
-# Ensure GROQ_API_KEY is set in environment variables
 client = None
 
 def get_client():
     global client
     if client is None:
-        api_key = os.getenv("GROQ_API_KEY")
-        if api_key:
-            client = AsyncGroq(api_key=api_key)
+        if GROQ_API_KEY:
+            client = AsyncGroq(api_key=GROQ_API_KEY)
     return client
 
 async def get_ai_answer(user_question: str, context: str) -> str:

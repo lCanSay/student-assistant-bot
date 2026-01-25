@@ -1,29 +1,31 @@
 import asyncio
-import os
 import logging
 from aiogram import Bot, Dispatcher
-from dotenv import load_dotenv
+from config import BOT_TOKEN
 
-from handlers import router
+# Import routers
+from bot.handlers.commands import router as commands_router
+from bot.handlers.info import router as info_router
+from bot.handlers.files import router as files_router
+from bot.handlers.ai import router as ai_router
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
 
 async def main():
-    # Load environment variables
-    load_dotenv()
-    
-    bot_token = os.getenv("BOT_TOKEN")
-    if not bot_token:
+    if not BOT_TOKEN:
         print("Error: BOT_TOKEN not found in .env file.")
         return
 
     # Initialize Bot and Dispatcher
-    bot = Bot(token=bot_token)
+    bot = Bot(token=BOT_TOKEN)
     dp = Dispatcher()
 
-    # Include routers
-    dp.include_router(router)
+    # Include routers in order
+    dp.include_router(commands_router)
+    dp.include_router(info_router)
+    dp.include_router(files_router)
+    dp.include_router(ai_router)
 
     print("Starting bot polling...")
     try:
