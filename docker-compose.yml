@@ -1,0 +1,12 @@
+services:
+  db:
+    image: ankane/pgvector:latest
+    ports:
+      - "5432:5432"
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: kbtu_db
+    volumes:
+      - ./postgres_data:/var/lib/postgresql/data
+    restart: always

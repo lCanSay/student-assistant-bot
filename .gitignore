@@ -2,4 +2,4 @@
 .env
 /__pycache__
 /data
-data_loader.py
+*__pycache__
