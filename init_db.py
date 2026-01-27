@@ -3,7 +3,7 @@ import json
 from sqlalchemy import text
 from core.database import engine, Base, async_session
 from core.models import KnowledgeItem, FileItem, User
-from services.repo import Repo
+import services.repo as repo
 from config import FAQ_FILE, FILES_FILE
 
 async def load_json(path):
@@ -25,36 +25,30 @@ async def init_db():
 
     print("Migrating data from JSON...")
     async with async_session() as session:
-        repo = Repo(session)
-
         # 1. Migrate Knowledge Base (FAQ)
         faq_data = await load_json(FAQ_FILE)
         print(f"Loading {len(faq_data)} FAQ items...")
         for item in faq_data:
-            # Assumes item structure: {"topic": "...", "text": "..."}
-            # Or if it's already list of strings/dicts. Based on previous structure it might be {"topic": str, "answer": str} or similar.
-            # I'll try to find 'text' or 'answer' or 'content'.
-            
             content = item.get("text") or item.get("answer") or item.get("content")
             topic = item.get("topic") or "General"
+            keywords = item.get("keywords") or []
             
             if content:
-                await repo.add_knowledge(content=content, category=topic)
+                await repo.add_knowledge(session, content=content, category=topic, keywords=keywords)
         
         # 2. Migrate Files
         files_data = await load_json(FILES_FILE)
         print(f"Loading {len(files_data)} files...")
         for item in files_data:
-            # Structure: {"file_id": "...", "caption": "...", "keywords": [...], "type": "document"}
             file_id = item.get("file_id")
             caption = item.get("caption") or ""
             keywords = item.get("keywords") or []
             file_type = item.get("type") or "document"
             
             if file_id:
-                await repo.add_file(file_id, caption, keywords, file_type)
+                await repo.add_file(session, file_id, caption, keywords, file_type)
 
-    print("Migration Complete! 🎉")
+    print("Migration Complete!")
 
 if __name__ == "__main__":
     asyncio.run(init_db())

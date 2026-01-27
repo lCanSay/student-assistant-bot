@@ -1,7 +1,7 @@
 from aiogram import Router, F, types
 from aiogram.types import Message
 from core.database import async_session
-from services.repo import Repo
+import services.repo as repo
 
 router = Router()
 
@@ -32,9 +32,8 @@ async def handle_new_file_post(message: Message):
         return
 
     async with async_session() as session:
-        repo = Repo(session)
-        # Note: Repo.add_file automatically generates embeddings for the caption
-        await repo.add_file(file_id, caption, keywords, file_type)
+        # Note: repo.add_file automatically generates embeddings for the caption
+        await repo.add_file(session, file_id, caption, keywords, file_type)
     
     try:
         await message.react([types.ReactionTypeEmoji(emoji="👍")])

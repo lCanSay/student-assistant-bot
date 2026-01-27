@@ -1,7 +1,7 @@
 from aiogram import Router
 from aiogram.types import Message
 from core.database import async_session
-from services.repo import Repo
+import services.repo as repo
 from services.ai_service import get_ai_answer
 
 router = Router()
@@ -15,14 +15,12 @@ async def ai_chat_handler(message: Message):
     user_text = message.text or ""
     
     async with async_session() as session:
-        repo = Repo(session)
-        
         # Search Knowledge Base (Vector Search)
-        knowledge_items = await repo.search_knowledge(user_text, limit=3)
+        knowledge_items = await repo.search_knowledge(session, user_text, limit=3)
         context = "\n".join([item.content for item in knowledge_items])
         
         # Check for files (Vector Search)
-        found_files = await repo.search_files(user_text, limit=3)
+        found_files = await repo.search_files(session, user_text, limit=3)
     
     # Decision Logic
     if not context:

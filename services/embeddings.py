@@ -1,13 +1,13 @@
 from sentence_transformers import SentenceTransformer
 
-class EmbeddingsService:
-    def __init__(self, model_name='intfloat/multilingual-e5-base'):
-        self.model = SentenceTransformer(model_name)
+# Load model once when the module is imported
+# This acts like a singleton without needing a class
+model = SentenceTransformer('intfloat/multilingual-e5-base')
 
-    def get_vector(self, text: str, is_query: bool = False) -> list[float]:
-        # E5 models expect 'query: ' prefix for search queries and 'passage: ' for documents
-        prefix = "query: " if is_query else "passage: "
-        return self.model.encode(prefix + text).tolist()
-
-# Singleton instance
-embeddings_service = EmbeddingsService()
+def get_vector(text: str, is_query: bool = False) -> list[float]:
+    """
+    Convert text to a vector using the loaded model.
+    Adds 'query: ' or 'passage: ' prefix for E5 models.
+    """
+    prefix = "query: " if is_query else "passage: "
+    return model.encode(prefix + text).tolist()
