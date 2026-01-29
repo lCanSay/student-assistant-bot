@@ -2,7 +2,7 @@ import json
 from aiogram import Router, F
 from aiogram.types import Message
 from config import SCHEDULE_FILE, ROOMS_FILE, CONTACTS_FILE
-from services.data_loader import load_data
+
 
 router = Router()
 
@@ -59,14 +59,19 @@ async def show_contacts(message: Message):
     """
     Handle contacts request using contacts.json.
     """
-    contacts = load_data(CONTACTS_FILE)
+    try:
+        with open(CONTACTS_FILE, 'r', encoding='utf-8') as f:
+            contacts = json.load(f)
+    except (FileNotFoundError, json.JSONDecodeError):
+        contacts = {}
+
     if not contacts:
         await message.answer("ℹ️ Контакты временно недоступны.")
         return
 
     text_lines = ["📞 **Контакты:**\n"]
     for key, value in contacts.items():
-        text_lines.append(value)
+        text_lines.append(f"{key}: {value}")
     
     await message.answer("\n\n".join(text_lines))
 

@@ -1,7 +1,6 @@
 from groq import AsyncGroq
 from config import GROQ_API_KEY
 
-# Initialize the Groq client
 client = None
 
 def get_client():
@@ -12,9 +11,6 @@ def get_client():
     return client
 
 async def get_ai_answer(user_question: str, context: str) -> str:
-    """
-    Get an answer from the AI model based on the question and context.
-    """
     client = get_client()
     if not client:
         return "⚠️ Ошибка: API ключ не найден. Пожалуйста, настройте GROQ_API_KEY."

@@ -17,7 +17,6 @@ async def load_json(path):
 async def init_db():
     print("Creating tables...")
     async with engine.begin() as conn:
-        # Enable pgvector extension
         await conn.execute(text("CREATE EXTENSION IF NOT EXISTS vector"))
         # Create tables
         await conn.run_sync(Base.metadata.create_all)

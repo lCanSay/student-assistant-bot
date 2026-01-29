@@ -3,11 +3,7 @@ import os
 from typing import List, Dict, Any
 
 def load_data(filepath: str) -> Any:
-    """
-    Load data from a JSON file.
-    """
     if not os.path.exists(filepath):
-        # Determine if it's contacts.json based on filename ending
         return {} if str(filepath).endswith('contacts.json') else []
         
     try:

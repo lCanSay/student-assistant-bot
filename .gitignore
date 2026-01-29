@@ -1,5 +1,6 @@
 /venv
 .env
 /__pycache__
-/data
+/data/*
+!/data/faq.json
 *__pycache__
