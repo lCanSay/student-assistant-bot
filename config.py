@@ -20,3 +20,4 @@ FILES_FILE = DATA_DIR / 'files.json'
 BOT_TOKEN = os.getenv("BOT_TOKEN")
 GROQ_API_KEY = os.getenv("GROQ_API_KEY")
 DATABASE_URL = os.getenv("DATABASE_URL", "postgresql+asyncpg://postgres:postgres@localhost:5432/kbtu_db")
+CHANNEL_ID = os.getenv("CHANNEL_ID", "").strip()

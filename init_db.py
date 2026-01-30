@@ -41,11 +41,20 @@ async def init_db():
         for item in files_data:
             file_id = item.get("file_id")
             caption = item.get("caption") or ""
-            keywords = item.get("keywords") or []
             file_type = item.get("type") or "document"
             
             if file_id:
-                await repo.add_file(session, file_id, caption, keywords, file_type)
+                file_unique_id = item.get("file_unique_id") or file_id 
+                file_name = item.get("file_name") or "unknown"
+                
+                await repo.upsert_file(
+                    session=session,
+                    file_id=file_id,
+                    file_unique_id=file_unique_id,
+                    file_name=file_name,
+                    caption=caption,
+                    file_type=file_type
+                )
 
     print("Migration Complete!")
 

@@ -22,26 +22,29 @@ async def add_knowledge(session: AsyncSession, content: str, category: str, keyw
     session.add(item)
     await session.commit()
 
-async def add_file(session: AsyncSession, file_id: str, caption: str, keywords: list[str], file_type: str):
-    vector = get_vector(caption, is_query=False)
+async def upsert_file(session: AsyncSession, file_id: str, file_unique_id: str, file_name: str, caption: str, file_type: str):
     
-    # Check if exists
-    stmt = select(FileItem).where(FileItem.file_id == file_id)
+    clean_caption = caption or ""
+    embedding_text = f"Filename: {file_name}. Description: {clean_caption}"
+    vector = get_vector(embedding_text, is_query=False)
+    
+    # Check if exists by unique_id
+    stmt = select(FileItem).where(FileItem.file_unique_id == file_unique_id)
     result = await session.execute(stmt)
     existing_item = result.scalar_one_or_none()
     
     if existing_item:
         # Update existing
-        existing_item.caption = caption
-        existing_item.keywords = keywords
+        existing_item.file_id = file_id
+        existing_item.caption = clean_caption
         existing_item.type = file_type
         existing_item.embedding = vector
     else:
         # Create new
         item = FileItem(
             file_id=file_id,
-            caption=caption,
-            keywords=keywords,
+            file_unique_id=file_unique_id,
+            caption=clean_caption,
             type=file_type,
             embedding=vector
         )
@@ -51,16 +54,19 @@ async def add_file(session: AsyncSession, file_id: str, caption: str, keywords: 
 
 async def search_knowledge(session: AsyncSession, query: str, limit: int = 3):
     query_vector = get_vector(query, is_query=True)
-    # Using cosine distance operator <=>
-    stmt = select(KnowledgeItem).order_by(KnowledgeItem.embedding.cosine_distance(query_vector)).limit(limit)
+    # Return both Item and distance
+    distance_col = KnowledgeItem.embedding.cosine_distance(query_vector).label("distance")
+    stmt = select(KnowledgeItem, distance_col).order_by(distance_col).limit(limit)
     result = await session.execute(stmt)
-    return result.scalars().all()
+    return result.all()
 
 async def search_files(session: AsyncSession, query: str, limit: int = 3):
     query_vector = get_vector(query, is_query=True)
-    stmt = select(FileItem).order_by(FileItem.embedding.cosine_distance(query_vector)).limit(limit)
+    # Return both FileItem and distance
+    distance_col = FileItem.embedding.cosine_distance(query_vector).label("distance")
+    stmt = select(FileItem, distance_col).order_by(distance_col).limit(limit)
     result = await session.execute(stmt)
-    return result.scalars().all()
+    return result.all()
 
 async def get_or_create_user(session: AsyncSession, telegram_id: int, full_name: str, username: str):
     stmt = select(User).where(User.telegram_id == telegram_id)

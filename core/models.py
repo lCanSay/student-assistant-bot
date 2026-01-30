@@ -16,10 +16,10 @@ class FileItem(Base):
     __tablename__ = 'files'
 
     id = Column(Integer, primary_key=True)
-    file_id = Column(String, unique=True, nullable=False)
+    file_id = Column(String, nullable=False)
+    file_unique_id = Column(String, unique=True, nullable=False)
     caption = Column(Text)
-    keywords = Column(ARRAY(String))
-    type = Column(String) # 'document' or 'photo'
+    type = Column(String)
     embedding = Column(Vector(768))
     created_at = Column(DateTime(timezone=True), server_default=func.now())
 
