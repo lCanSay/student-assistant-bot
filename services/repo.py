@@ -1,17 +1,15 @@
-from sqlalchemy import select
+from sqlalchemy import select, update, delete
 from sqlalchemy.ext.asyncio import AsyncSession
 from core.models import KnowledgeItem, FileItem, User
 from services.embeddings import get_vector
 
 async def add_knowledge(session: AsyncSession, content: str, category: str, keywords: list[str] = None):
-    # Check if exists to avoid duplicates
     stmt = select(KnowledgeItem).where(KnowledgeItem.content == content)
     result = await session.execute(stmt)
     if result.scalars().first():
         return
 
-    # Construct enriched string for embedding (E5 format)
-    # get_vector adds "passage: " prefix automatically
+    # Construct string for embedding (E5 format), concat with keywords
     keywords_str = ", ".join(keywords) if keywords else ""
     enriched_text = f"Topic: {category}. Keywords: {keywords_str}. Content: {content}"
     
@@ -21,6 +19,30 @@ async def add_knowledge(session: AsyncSession, content: str, category: str, keyw
     item = KnowledgeItem(content=content, category=category, embedding=vector)
     session.add(item)
     await session.commit()
+
+async def get_all_knowledge(session: AsyncSession, limit: int = 200) -> list[KnowledgeItem]:
+    stmt = select(KnowledgeItem).order_by(KnowledgeItem.id.desc()).limit(limit)
+    result = await session.execute(stmt)
+    return result.scalars().all()
+
+async def update_knowledge(session: AsyncSession, item_id: int, new_content: str, new_category: str) -> bool:
+    enriched_text = f"Topic: {new_category}. Content: {new_content}"
+    vector = get_vector(enriched_text, is_query=False)
+    
+    stmt = (
+        update(KnowledgeItem)
+        .where(KnowledgeItem.id == item_id)
+        .values(content=new_content, category=new_category, embedding=vector)
+    )
+    result = await session.execute(stmt)
+    await session.commit()
+    return result.rowcount > 0
+
+async def delete_knowledge(session: AsyncSession, item_id: int) -> bool:
+    stmt = delete(KnowledgeItem).where(KnowledgeItem.id == item_id)
+    result = await session.execute(stmt)
+    await session.commit()
+    return result.rowcount > 0
 
 async def upsert_file(session: AsyncSession, file_id: str, file_unique_id: str, file_name: str, caption: str, file_type: str):
     

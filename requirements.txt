@@ -10,3 +10,5 @@ pgvector
 sentence-transformers
 groq
 aiofiles
+streamlit
+pandas
