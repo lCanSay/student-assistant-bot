@@ -2,6 +2,8 @@ import json
 import os
 from typing import List, Dict, Any
 
+# TODO: Remove this file and refactor other parts connected to it
+
 def load_data(filepath: str) -> Any:
     if not os.path.exists(filepath):
         return {} if str(filepath).endswith('contacts.json') else []
