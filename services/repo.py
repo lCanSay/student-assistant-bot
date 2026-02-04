@@ -1,4 +1,4 @@
-from sqlalchemy import select, update, delete
+from sqlalchemy import select, update, delete, func 
 from sqlalchemy.ext.asyncio import AsyncSession
 from core.models import KnowledgeItem, FileItem, User
 from services.embeddings import get_vector
@@ -56,13 +56,11 @@ async def upsert_file(session: AsyncSession, file_id: str, file_unique_id: str, 
     existing_item = result.scalar_one_or_none()
     
     if existing_item:
-        # Update existing
         existing_item.file_id = file_id
         existing_item.caption = clean_caption
         existing_item.type = file_type
         existing_item.embedding = vector
     else:
-        # Create new
         item = FileItem(
             file_id=file_id,
             file_unique_id=file_unique_id,
@@ -98,5 +96,10 @@ async def get_or_create_user(session: AsyncSession, telegram_id: int, full_name:
     if not user:
         user = User(telegram_id=telegram_id, full_name=full_name, username=username)
         session.add(user)
-        await session.commit()
+    else:
+        user.full_name = full_name
+        user.username = username
+        user.last_active = func.now()
+        
+    await session.commit()
     return user
