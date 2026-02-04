@@ -30,7 +30,7 @@ if page == "📝 База Знаний":
     with st.expander("➕ Добавить новую запись"):
         with st.form("add_new_form"):
             new_cat = st.text_input("Категория (Topic)", value="General")
-            new_keywords = st.text_input("Ключевые слова(keywords)", value=[])
+            new_keywords = st.text_input("Ключевые слова (Keywords)")
             new_content = st.text_area("Содержание (Content)")
             
             submitted = st.form_submit_button("Сохранить")
@@ -89,7 +89,7 @@ if page == "📝 База Знаний":
                 if save_click:
                     async def save_logic():
                         async with async_session() as session:
-                            await repo.update_knowledge(session, edit_id, edit_content, edit_cat)
+                            return await repo.update_knowledge(session, edit_id, edit_content, edit_cat)
                     if run_async(save_logic()):
                         st.success("Обновлено!")
                         st.rerun()
@@ -99,7 +99,7 @@ if page == "📝 База Знаний":
                 if del_click:
                     async def del_logic():
                         async with async_session() as session:
-                            await repo.delete_knowledge(session, edit_id)
+                            return await repo.delete_knowledge(session, edit_id)
                     if run_async(del_logic()):
                         st.warning("Удалено!")
                         st.rerun()
