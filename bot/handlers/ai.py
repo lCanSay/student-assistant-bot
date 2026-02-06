@@ -16,12 +16,19 @@ async def ai_chat_handler(message: Message):
     
     async with async_session() as session:
         # Ensure user exists (in case they didn't press /start)
-        await repo.get_or_create_user(
+        user = await repo.get_or_create_user(
             session,
             telegram_id=message.from_user.id,
             full_name=message.from_user.full_name,
             username=message.from_user.username
         )
+
+        # Check Quota
+        allowed = await repo.check_and_increment_quota(session, user)
+        if not allowed:
+            await session.refresh(user)
+            await message.answer(f"Limit reached (50 requests/24h). Access restores at {user.quota_reset_at}.")
+            return
 
         # Search Knowledge Base (Vector Search)
         knowledge_with_score = await repo.search_knowledge(session, user_text, limit=3)

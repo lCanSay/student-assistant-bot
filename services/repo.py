@@ -1,5 +1,6 @@
 from sqlalchemy import select, update, delete, func 
 from sqlalchemy.ext.asyncio import AsyncSession
+from datetime import datetime, timedelta, timezone
 from core.models import KnowledgeItem, FileItem, User
 from services.embeddings import get_vector
 
@@ -103,3 +104,21 @@ async def get_or_create_user(session: AsyncSession, telegram_id: int, full_name:
         
     await session.commit()
     return user
+
+async def check_and_increment_quota(session: AsyncSession, user: User, limit: int = 5) -> bool:
+    now = datetime.now(timezone.utc)
+
+    if user.quota_reset_at and now > user.quota_reset_at:
+        user.requests_left = limit
+        user.quota_reset_at = now + timedelta(hours=24)
+    
+    if user.quota_reset_at is None:
+         user.requests_left = limit
+         user.quota_reset_at = now + timedelta(hours=24)
+
+    if user.requests_left > 0:
+        user.requests_left -= 1
+        await session.commit()
+        return True
+    else:
+        return False
