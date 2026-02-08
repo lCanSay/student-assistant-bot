@@ -4,7 +4,7 @@ from sqlalchemy import text
 from core.database import engine, Base, async_session
 from core.models import KnowledgeItem, FileItem, User
 import services.repo as repo
-from config import FAQ_FILE, FILES_FILE
+from config import FAQ_FILE
 
 async def load_json(path):
     try:
@@ -35,26 +35,7 @@ async def init_db():
             if content:
                 await repo.add_knowledge(session, content=content, category=topic, keywords=keywords)
         
-        # 2. Migrate Files
-        files_data = await load_json(FILES_FILE)
-        print(f"Loading {len(files_data)} files...")
-        for item in files_data:
-            file_id = item.get("file_id")
-            caption = item.get("caption") or ""
-            file_type = item.get("type") or "document"
-            
-            if file_id:
-                file_unique_id = item.get("file_unique_id") or file_id 
-                file_name = item.get("file_name") or "unknown"
-                
-                await repo.upsert_file(
-                    session=session,
-                    file_id=file_id,
-                    file_unique_id=file_unique_id,
-                    file_name=file_name,
-                    caption=caption,
-                    file_type=file_type
-                )
+
 
     print("Migration Complete!")
 

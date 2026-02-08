@@ -4,11 +4,6 @@ def get_main_keyboard() -> ReplyKeyboardMarkup:
     # Creates and returns the main menu keyboard.
     kb_list = [
         [
-            KeyboardButton(text="📅 Мое расписание"),
-            KeyboardButton(text="🔍 Свободные аудитории")
-        ],
-        [
-            KeyboardButton(text="📞 Контакты"),
             KeyboardButton(text="❓ Помощь")
         ]
     ]

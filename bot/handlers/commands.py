@@ -1,4 +1,4 @@
-from aiogram import Router
+from aiogram import Router, F
 from aiogram.filters import Command
 from aiogram.types import Message
 from bot.keyboards import get_main_keyboard
@@ -23,4 +23,11 @@ async def cmd_start(message: Message):
     await message.answer(
         "Привет! Я твой студенческий помощник. Чем могу помочь?",
         reply_markup=get_main_keyboard()
+    )
+
+@router.message(F.text == "❓ Помощь")
+async def show_help(message: Message):
+    await message.answer(
+        "Я могу отвечать на ваши вопросы и сохранять файлы.\n"
+        "Просто напишите ваш вопрос или отправьте документ/фото с подписью, чтобы я его запомнил!"
     )
