@@ -3,13 +3,11 @@ import logging
 from aiogram import Bot, Dispatcher
 from config import BOT_TOKEN
 
-# Import routers
 from bot.handlers.commands import router as commands_router
 from bot.handlers.info import router as info_router
 from bot.handlers.files import router as files_router
 from bot.handlers.ai import router as ai_router
 
-# Configure logging
 logging.basicConfig(level=logging.INFO)
 
 async def main():
@@ -21,11 +19,14 @@ async def main():
     bot = Bot(token=BOT_TOKEN)
     dp = Dispatcher()
 
-    # Include routers in order
     dp.include_router(commands_router)
     dp.include_router(info_router)
     dp.include_router(files_router)
     dp.include_router(ai_router)
+
+    from bot.middlewares.throttling import ThrottlingMiddleware
+    dp.message.middleware(ThrottlingMiddleware(ttl=5.0))
+
 
     print("Starting bot polling...")
     try:

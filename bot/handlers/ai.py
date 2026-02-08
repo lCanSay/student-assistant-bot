@@ -15,16 +15,30 @@ async def ai_chat_handler(message: Message):
     user_text = message.text or ""
     
     async with async_session() as session:
+        # Ensure user exists (in case they didn't press /start)
+        user = await repo.get_or_create_user(
+            session,
+            telegram_id=message.from_user.id,
+            full_name=message.from_user.full_name,
+            username=message.from_user.username
+        )
+
+        # Check Quota
+        allowed = await repo.check_and_increment_quota(session, user)
+        if not allowed:
+            await session.refresh(user)
+            await message.answer(f"Limit reached (50 requests/24h). Access restores at {user.quota_reset_at}.")
+            return
+
         # Search Knowledge Base (Vector Search)
         knowledge_with_score = await repo.search_knowledge(session, user_text, limit=3)
-        knowledge_items = [item for item, dist in knowledge_with_score]
+        knowledge_items = [item for item, dist in knowledge_with_score if dist <= 0.7]
                 
         context = "\n".join([item.content for item in knowledge_items])
 
         found_files_with_score = await repo.search_files(session, user_text, limit=3)
         
         # Filter by threshold (distance <= 0.5 means good match)
-        # cosine_distance: 0 = identical, 1 = orthogonal, 2 = opposite
         valid_files = []
         for file_item, distance in found_files_with_score:
             if distance <= 0.2:

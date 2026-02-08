@@ -12,3 +12,4 @@ groq
 aiofiles
 streamlit
 pandas
+cachetools

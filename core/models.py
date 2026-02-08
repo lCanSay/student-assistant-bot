@@ -31,3 +31,5 @@ class User(Base):
     username = Column(String)
     joined_at = Column(DateTime(timezone=True), server_default=func.now())
     last_active = Column(DateTime(timezone=True), onupdate=func.now())
+    requests_left = Column(Integer, default=50)
+    quota_reset_at = Column(DateTime(timezone=True), server_default=func.now())
