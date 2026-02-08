@@ -20,7 +20,7 @@ def run_async(coro):
 
 # Sidebar
 st.sidebar.title("Admin Panel")
-page = st.sidebar.radio("Navigation", ["📝 База Знаний", "🧠 Лаборатория", "📊 Аналитика"])
+page = st.sidebar.radio("Navigation", ["📝 База Знаний", "📂 Файлы", "👥 Пользователи", "🧠 Лаборатория"])
 
 # PAGE 1: KNOWLEDGE BASE
 if page == "📝 База Знаний":
@@ -106,7 +106,62 @@ if page == "📝 База Знаний":
                     else:
                         st.error("Ошибка при удалении.")
 
-# PAGE 2: PLAYGROUND
+# PAGE 2: FILES
+elif page == "📂 Файлы":
+    st.title("Управление Файлами")
+    st.write("Просмотр индексированных файлов.")
+
+    async def get_files():
+        async with async_session() as session:
+             # We just need to fetch all files. Repo doesn't have get_all_files, but we can search with empty string or implement it. 
+             # Let's implementation a simple select all here or verify if search works with empty. 
+             # Actually, let's just use a direct query here for admin purposes or add a repo method.
+             # For simplicity in admin, direct query is fine given imports.
+             from sqlalchemy import select
+             from core.models import FileItem
+             result = await session.execute(select(FileItem).limit(100))
+             return result.scalars().all()
+
+    files = run_async(get_files())
+    
+    if files:
+        df_files = pd.DataFrame([
+            {"id": f.id, "name": f.file_unique_id, "caption": f.caption, "type": f.type}
+            for f in files
+        ])
+        st.dataframe(df_files, use_container_width=True)
+    else:
+        st.info("Файлов нет.")
+
+# PAGE 3: USERS
+elif page == "👥 Пользователи":
+    st.title("Пользователи и Квоты")
+    
+    async def get_users():
+        async with async_session() as session:
+             from sqlalchemy import select
+             from core.models import User
+             result = await session.execute(select(User).order_by(User.last_active.desc()).limit(100))
+             return result.scalars().all()
+
+    users = run_async(get_users())
+    
+    if users:
+        df_users = pd.DataFrame([
+            {
+                "ID": u.telegram_id, 
+                "username": u.username, 
+                "fullname": u.full_name,
+                "requests_left": u.requests_left,
+                "reset_at": u.quota_reset_at
+            }
+            for u in users
+        ])
+        st.dataframe(df_users, use_container_width=True)
+    else:
+        st.info("Пользователей нет.")
+
+# PAGE 4: PLAYGROUND
 elif page == "🧠 Лаборатория":
     st.title("RAG Playground (Тест Поиска)")
     
@@ -140,16 +195,3 @@ elif page == "🧠 Лаборатория":
             st.subheader("Ответ AI:")
             st.success(ai_resp)
 
-# PAGE 3: ANALYTICS
-elif page == "📊 Аналитика":
-    st.title("Аналитика")
-    st.write("Здесь будет статистика использования бота.")
-    
-    # Dummy chart
-    data = pd.DataFrame({
-        'day': ['Mon', 'Tue', 'Wed', 'Thu', 'Fri'],
-        'queries': [10, 25, 15, 30, 45]
-    })
-    st.bar_chart(data.set_index('day'))
-
-    st.caption("Coming soon...")
