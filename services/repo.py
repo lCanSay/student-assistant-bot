@@ -105,7 +105,13 @@ async def get_or_create_user(session: AsyncSession, telegram_id: int, full_name:
     await session.commit()
     return user
 
-async def check_and_increment_quota(session: AsyncSession, user: User, limit: int = 5) -> bool:
+async def check_and_increment_quota(session: AsyncSession, user: User, limit: int = None) -> bool:
+    if limit is None:
+        from config import DAILY_LIMIT
+        limit = DAILY_LIMIT
+
+    await session.refresh(user)
+
     now = datetime.now(timezone.utc)
 
     if user.quota_reset_at and now > user.quota_reset_at:

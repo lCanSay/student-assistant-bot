@@ -3,6 +3,7 @@ from aiogram.types import Message
 from core.database import async_session
 import services.repo as repo
 from services.ai_service import get_ai_answer
+from config import DAILY_LIMIT
 
 router = Router()
 
@@ -27,7 +28,7 @@ async def ai_chat_handler(message: Message):
         allowed = await repo.check_and_increment_quota(session, user)
         if not allowed:
             await session.refresh(user)
-            await message.answer(f"Limit reached (50 requests/24h). Access restores at {user.quota_reset_at}.")
+            await message.answer(f"Limit reached ({DAILY_LIMIT} requests/24h). Access restores at {user.quota_reset_at}.")
             return
 
         # Search Knowledge Base (Vector Search)
