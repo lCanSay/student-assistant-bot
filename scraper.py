@@ -37,7 +37,7 @@ from core.wsp_models import (
     ScheduleEvent,
     Subject,
 )
-from sqlalchemy import select, text
+from sqlalchemy import select, text, func, delete
 
 # ── Constants ────────────────────────────────────────────────────
 WSP_LOGIN = os.getenv("WSP_LOGIN")
@@ -184,7 +184,7 @@ def validate_block(block: ParsedBlock) -> bool:
     Level 1 — Block-level:
         Rule 1 (Sunday Ban): drop if day_of_week is Sunday.
         Rule 2 (Thresholds):
-            current/max → drop if max < 15 OR current < 7.
+            current/max → drop if max < 11 OR current < 7.
             current only → drop if current < 7.
 
     Returns True if valid, False otherwise.
@@ -204,7 +204,7 @@ def validate_block(block: ParsedBlock) -> bool:
 
     if mx is not None:
         # Format: (current/max)
-        if mx < 13 or (cur is not None and cur < 7):
+        if mx < 9 or (cur is not None and cur < 7):
             block.is_valid = False
             block.drop_reason = f"Rule 2: capacity {cur}/{mx}"
             log.info(
@@ -663,19 +663,56 @@ async def get_or_create_room(session, number: str) -> Room:
 
 
 async def save_subject_to_db(session, entry: SubjectEntry) -> None:
-    """Upsert a Subject and insert its valid ScheduleEvents."""
-    # Ensure code is stripped of spaces for DB consistency
-    clean_code = entry.code.strip().replace(" ", "")
+    """Upsert a Subject and insert its valid ScheduleEvents with conflict resolution."""
+    # Normalize code: remove non-alphanumeric characters (keeps Cyrillic, etc.)
+    base_code = "".join(ch for ch in entry.code if ch.isalnum())
+    entry.code = base_code  # Update entry for consistency
 
-    # Upsert Subject
+    # Check validity of new data
+    new_valid_count = sum(1 for b in entry.blocks if b.is_valid)
+
+    # Check for existing Subject
     result = await session.execute(
-        select(Subject).where(Subject.code == clean_code)
+        select(Subject).where(Subject.code == base_code)
     )
     subj = result.scalar_one_or_none()
 
-    if subj is None:
+    if subj is not None:
+        # Conflict Resolution: Compare schedule density
+        existing_count = (await session.execute(
+            select(func.count()).where(ScheduleEvent.subject_id == subj.id)
+        )).scalar() or 0
+
+        if new_valid_count > existing_count:
+            log.info(
+                "Replacing schedule for %s (New: %d events > Old: %d events)",
+                base_code, new_valid_count, existing_count
+            )
+            # Delete old events
+            await session.execute(
+                delete(ScheduleEvent).where(ScheduleEvent.subject_id == subj.id)
+            )
+            
+            # Update metadata
+            if entry.name_en: subj.name_en = entry.name_en
+            if entry.name_ru: subj.name_ru = entry.name_ru
+            if entry.name_kz: subj.name_kz = entry.name_kz
+            if entry.department: subj.department = entry.department
+            if entry.credits is not None: subj.credits = entry.credits
+            if entry.formula: subj.formula = entry.formula
+            if entry.year is not None: subj.year = entry.year
+            if entry.period is not None: subj.period = entry.period
+        else:
+            log.info(
+                "Keeping existing schedule for %s (New: %d <= Old: %d)",
+                base_code, new_valid_count, existing_count
+            )
+            return
+
+    else:
+        # Create new Subject
         subj = Subject(
-            code=clean_code,
+            code=base_code,
             name_en=entry.name_en or None,
             name_ru=entry.name_ru or None,
             name_kz=entry.name_kz or None,
@@ -686,81 +723,37 @@ async def save_subject_to_db(session, entry: SubjectEntry) -> None:
             period=entry.period,
         )
         session.add(subj)
-        await session.flush()
-    else:
-        # Update fields if new data is available
-        if entry.name_en:
-            subj.name_en = entry.name_en
-
-        if entry.name_ru:
-            subj.name_ru = entry.name_ru
-        if entry.name_kz:
-            subj.name_kz = entry.name_kz
-        if entry.department:
-            subj.department = entry.department
-        if entry.credits is not None:
-            subj.credits = entry.credits
-        if entry.formula:
-            subj.formula = entry.formula
-        if entry.year is not None:
-            subj.year = entry.year
-        if entry.period is not None:
-            subj.period = entry.period
+        await session.flush()  # get ID
 
     # Insert valid events (deduplicate blocks in-memory first)
     seen_keys: set[tuple] = set()   # (day, start_time, lesson_type_str, room_name)
+    inserted_count = 0
+    
     for block in entry.blocks:
         if not block.is_valid:
             continue
 
         # Skip blocks with missing critical data
         if not block.instructor or not block.room:
-            log.warning(
-                "Skipping block with missing instructor/room: %s",
-                block.raw_text[:60],
-            )
             continue
 
-        if block.day_of_week is None or block.start_time is None or block.end_time is None:
-            log.warning(
-                "Skipping block with missing time/day: %s",
-                block.raw_text[:60],
-            )
+        if block.day_of_week is None or block.start_time is None:
             continue
 
         # Resolve lesson type
         lt = LESSON_TYPE_MAP.get(block.lesson_type)
         if lt is None:
-            log.warning(
-                "Unknown lesson type '%s' — skipping block: %s",
-                block.lesson_type,
-                block.raw_text[:60],
-            )
             continue
 
-        # In-memory dedup: skip if we already have this exact slot
+        # In-memory dedup
         dedup_key = (block.day_of_week, block.start_time, lt, block.room)
         if dedup_key in seen_keys:
-            log.debug("Duplicate block in-memory — skipping: %s", dedup_key)
             continue
         seen_keys.add(dedup_key)
 
         instructor = await get_or_create_instructor(session, block.instructor)
         room = await get_or_create_room(session, block.room)
 
-        # Check for existing event in DB to avoid dupes across runs
-        existing = await session.execute(
-            select(ScheduleEvent).where(
-                ScheduleEvent.subject_id == subj.id,
-                ScheduleEvent.day_of_week == block.day_of_week,
-                ScheduleEvent.start_time == block.start_time,
-                ScheduleEvent.lesson_type == lt,
-                ScheduleEvent.room_id == room.id,
-            )
-        )
-        if existing.scalar_one_or_none() is not None:
-            log.debug("Event already exists in DB — skipping duplicate")
-            continue
 
         event = ScheduleEvent(
             subject_id=subj.id,
@@ -777,9 +770,11 @@ async def save_subject_to_db(session, entry: SubjectEntry) -> None:
             student_count_max=block.max_students,
         )
         session.add(event)
+        inserted_count += 1
 
     await session.flush()
-    log.info("Saved subject %s to DB (id=%d)", entry.code, subj.id)
+    if inserted_count > 0:
+        log.info("Saved subject %s to DB (id=%d, events=%d)", base_code, subj.id, inserted_count)
 
 
 # ═══════════════════════════════════════════════════════════════
@@ -803,7 +798,7 @@ async def main() -> None:
 
     async with async_playwright() as pw:
         # Production: headless=True if stable
-        browser = await pw.chromium.launch(headless=False, slow_mo=1000)
+        browser = await pw.chromium.launch(headless=False)
         context = await browser.new_context(
             viewport={"width": 1600, "height": 900},
         )
@@ -829,7 +824,7 @@ async def main() -> None:
             no_new_count = 0
             
             # Temporary safety limit (remove later)
-            TEST_LIMIT = 5 
+            TEST_LIMIT = 50
             
             # Helper logic:
             # We need to scroll RIGHT to ensure columns 8/9 (Year/Period) are rendered/visible.
@@ -920,4 +915,9 @@ async def main() -> None:
 
 
 if __name__ == "__main__":
-    asyncio.run(main())
+    try:
+        asyncio.run(main())
+    except KeyboardInterrupt:
+        log.info("Parsing keyboard interrupted (Ctrl+C). Browser closed.")
+    except Exception as e:
+        log.critical("Critical error in parser: %s", e)
