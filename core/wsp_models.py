@@ -3,6 +3,7 @@ from __future__ import annotations
 import enum
 from typing import List, Optional
 
+from core.database import Base
 from sqlalchemy import (
     Enum as SAEnum,
     Float,
@@ -14,11 +15,7 @@ from sqlalchemy import (
     Time,
     UniqueConstraint,
 )
-from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
-
-
-class Base(DeclarativeBase):
-    pass
+from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 
 class DayOfWeek(enum.Enum):

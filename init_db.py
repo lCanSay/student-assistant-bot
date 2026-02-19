@@ -3,8 +3,11 @@ import json
 from sqlalchemy import text
 from core.database import engine, Base, async_session
 from core.models import KnowledgeItem, FileItem, User
+from core.wsp_models import Subject, Instructor, Room, ScheduleEvent
 import services.repo as repo
 from config import FAQ_FILE
+
+# TODO: refactor this later
 
 async def load_json(path):
     try:
@@ -22,22 +25,21 @@ async def init_db():
         await conn.run_sync(Base.metadata.create_all)
     print("Tables created.")
 
-    print("Migrating data from JSON...")
-    async with async_session() as session:
-        # 1. Migrate Knowledge Base (FAQ)
-        faq_data = await load_json(FAQ_FILE)
-        print(f"Loading {len(faq_data)} FAQ items...")
-        for item in faq_data:
-            content = item.get("text") or item.get("answer") or item.get("content")
-            topic = item.get("topic") or "General"
-            keywords = item.get("keywords") or []
+    # print("Migrating data from JSON...")
+    # async with async_session() as session:
+    #     # 1. Migrate Knowledge Base (FAQ)
+    #     faq_data = await load_json(FAQ_FILE)
+    #     print(f"Loading {len(faq_data)} FAQ items...")
+    #     for item in faq_data:
+    #         content = item.get("text") or item.get("answer") or item.get("content")
+    #         topic = item.get("topic") or "General"
+    #         keywords = item.get("keywords") or []
             
-            if content:
-                await repo.add_knowledge(session, content=content, category=topic, keywords=keywords)
+    #         if content:
+    #             await repo.add_knowledge(session, content=content, category=topic, keywords=keywords)
         
 
-
-    print("Migration Complete!")
+    # print("Migration Complete!")
 
 if __name__ == "__main__":
     asyncio.run(init_db())

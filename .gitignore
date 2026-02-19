@@ -6,3 +6,4 @@
 *__pycache__
 recon_wsp.py
 /.agent/
+/tests/

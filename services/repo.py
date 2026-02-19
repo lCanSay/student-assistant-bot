@@ -1,6 +1,8 @@
-from sqlalchemy import select, update, delete, func 
+from sqlalchemy import select, update, delete, func
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.engine import Result
 from datetime import datetime, timedelta, timezone
+from typing import Sequence
 from core.models import KnowledgeItem, FileItem, User
 from services.embeddings import get_vector
 
@@ -21,7 +23,7 @@ async def add_knowledge(session: AsyncSession, content: str, category: str, keyw
     session.add(item)
     await session.commit()
 
-async def get_all_knowledge(session: AsyncSession, limit: int = 200) -> list[KnowledgeItem]:
+async def get_all_knowledge(session: AsyncSession, limit: int = 200) -> Sequence[KnowledgeItem]:
     stmt = select(KnowledgeItem).order_by(KnowledgeItem.id.desc()).limit(limit)
     result = await session.execute(stmt)
     return result.scalars().all()
