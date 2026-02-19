@@ -13,3 +13,4 @@ aiofiles
 streamlit
 pandas
 cachetools
+playwright

@@ -7,3 +7,5 @@
 recon_wsp.py
 /.agent/
 /tests/
+*.log
+

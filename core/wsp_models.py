@@ -25,7 +25,6 @@ class DayOfWeek(enum.Enum):
     THURSDAY  = "Thu"
     FRIDAY    = "Fri"
     SATURDAY  = "Sat"
-    SUNDAY    = "Sun"
 
 
 class LessonType(enum.Enum):
@@ -45,8 +44,8 @@ class Subject(Base):
     department: Mapped[Optional[str]] = mapped_column(String(255))
     credits: Mapped[Optional[float]] = mapped_column(Float)       # Float: fractional credits possible
     formula: Mapped[Optional[str]] = mapped_column(String(20))    # e.g. "1/0/2" (Lec/Prac/Lab)
-    year: Mapped[Optional[int]] = mapped_column(SmallInteger)
-    period: Mapped[Optional[int]] = mapped_column(SmallInteger)
+    year: Mapped[Optional[str]] = mapped_column(String(20))
+    period: Mapped[Optional[str]] = mapped_column(String(50))
 
     events: Mapped[List[ScheduleEvent]] = relationship(
         "ScheduleEvent", back_populates="subject", cascade="all, delete-orphan"
