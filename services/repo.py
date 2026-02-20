@@ -1,6 +1,8 @@
-from sqlalchemy import select, update, delete, func 
+from sqlalchemy import select, update, delete, func
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.engine import Result
 from datetime import datetime, timedelta, timezone
+from typing import Sequence
 from core.models import KnowledgeItem, FileItem, User
 from services.embeddings import get_vector
 
@@ -21,7 +23,7 @@ async def add_knowledge(session: AsyncSession, content: str, category: str, keyw
     session.add(item)
     await session.commit()
 
-async def get_all_knowledge(session: AsyncSession, limit: int = 200) -> list[KnowledgeItem]:
+async def get_all_knowledge(session: AsyncSession, limit: int = 200) -> Sequence[KnowledgeItem]:
     stmt = select(KnowledgeItem).order_by(KnowledgeItem.id.desc()).limit(limit)
     result = await session.execute(stmt)
     return result.scalars().all()
@@ -105,7 +107,13 @@ async def get_or_create_user(session: AsyncSession, telegram_id: int, full_name:
     await session.commit()
     return user
 
-async def check_and_increment_quota(session: AsyncSession, user: User, limit: int = 5) -> bool:
+async def check_and_increment_quota(session: AsyncSession, user: User, limit: int = None) -> bool:
+    if limit is None:
+        from config import DAILY_LIMIT
+        limit = DAILY_LIMIT
+
+    await session.refresh(user)
+
     now = datetime.now(timezone.utc)
 
     if user.quota_reset_at and now > user.quota_reset_at:

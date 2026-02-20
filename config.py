@@ -18,3 +18,8 @@ GROQ_API_KEY = os.getenv("GROQ_API_KEY")
 DB_HOST = os.getenv("DB_HOST", "localhost")
 DATABASE_URL = os.getenv("DATABASE_URL", f"postgresql+asyncpg://postgres:postgres@{DB_HOST}:5432/kbtu_db")
 CHANNEL_ID = os.getenv("CHANNEL_ID", "").strip()
+DAILY_LIMIT = int(os.getenv("DAILY_LIMIT", 5))
+
+# WSP Portal
+WSP_LOGIN = os.getenv("WSP_LOGIN")
+WSP_PASSWORD = os.getenv("WSP_PASSWORD")

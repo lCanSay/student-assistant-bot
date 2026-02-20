@@ -6,6 +6,10 @@ import services.repo as repo
 from services.ai_service import get_ai_answer
 from dotenv import load_dotenv
 
+from sqlalchemy import select
+from sqlalchemy.orm import selectinload
+from core.wsp_models import Subject, ScheduleEvent, Instructor, Room
+
 load_dotenv()
 
 st.set_page_config(page_title="RAG Bot Admin", layout="wide")
@@ -20,7 +24,7 @@ def run_async(coro):
 
 # Sidebar
 st.sidebar.title("Admin Panel")
-page = st.sidebar.radio("Navigation", ["📝 База Знаний", "📂 Файлы", "👥 Пользователи", "🧠 Лаборатория"])
+page = st.sidebar.radio("Navigation", ["📝 База Знаний", "📂 Файлы", "👥 Пользователи", "🧠 Лаборатория", "📅 Расписание"])
 
 # PAGE 1: KNOWLEDGE BASE
 if page == "📝 База Знаний":
@@ -113,10 +117,6 @@ elif page == "📂 Файлы":
 
     async def get_files():
         async with async_session() as session:
-             # We just need to fetch all files. Repo doesn't have get_all_files, but we can search with empty string or implement it. 
-             # Let's implementation a simple select all here or verify if search works with empty. 
-             # Actually, let's just use a direct query here for admin purposes or add a repo method.
-             # For simplicity in admin, direct query is fine given imports.
              from sqlalchemy import select
              from core.models import FileItem
              result = await session.execute(select(FileItem).limit(100))
@@ -194,4 +194,69 @@ elif page == "🧠 Лаборатория":
             
             st.subheader("Ответ AI:")
             st.success(ai_resp)
+
+# PAGE 5: SCHEDULE VIEWER
+elif page == "📅 Расписание":
+    st.title("Просмотр Расписания WSP")
+
+    async def get_subjects():
+        async with async_session() as session:
+            # Fetch subjects that have at least one event
+            stmt = select(Subject).where(Subject.events.any()).order_by(Subject.code)
+            result = await session.execute(stmt)
+            return result.scalars().all()
+
+    async def get_schedule(subject_id: int):
+        async with async_session() as session:
+            stmt = (
+                select(ScheduleEvent)
+                .where(ScheduleEvent.subject_id == subject_id)
+                .options(
+                    selectinload(ScheduleEvent.instructor),
+                    selectinload(ScheduleEvent.room)
+                )
+            )
+            result = await session.execute(stmt)
+            return result.scalars().all()
+
+    subjects = run_async(get_subjects())
+
+    if not subjects:
+        st.warning("Нет предметов с расписанием.")
+    else:
+        # Create a mapping for the selectbox
+        subject_map = {s.id: f"{s.code} - {s.name_en or s.name_ru or 'No Name'}" for s in subjects}
+        selected_sub_id = st.selectbox("Выберите предмет:", options=subject_map.keys(), format_func=lambda x: subject_map[x])
+
+        if selected_sub_id:
+            events = run_async(get_schedule(selected_sub_id))
+            
+            if events:
+                data = []
+                for e in events:
+                    t_str = f"{e.start_time.strftime('%H:%M')} - {e.end_time.strftime('%H:%M')}"
+                    
+                    data.append({
+                        "День": e.day_of_week.value,
+                        "Время": t_str,
+                        "Тип": e.lesson_type.value,
+                        "Преподаватель": e.instructor.full_name if e.instructor else "—",
+                        "Кабинет": e.room.number if e.room else "—",
+                        "Вместимость": e.group_info or "",
+                        # Hidden sort key
+                        "_day_sort": {
+                            "Mon": 1, "Tue": 2, "Wed": 3, "Thu": 4, "Fri": 5, "Sat": 6, "Sun": 7
+                        }.get(e.day_of_week.value, 8)
+                    })
+                
+                df = pd.DataFrame(data)
+                
+                # Sort chrono
+                df = df.sort_values(by=["_day_sort", "Время"])
+                df = df.drop(columns=["_day_sort"])
+                
+                st.write(f"Найдено событий: {len(events)}")
+                st.dataframe(df, use_container_width=True, hide_index=True)
+            else:
+                st.info("Для этого предмета нет событий.")
 
