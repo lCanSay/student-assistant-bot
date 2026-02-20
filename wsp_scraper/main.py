@@ -12,6 +12,7 @@ from playwright.async_api import async_playwright
 from core.database import engine, Base, async_session
 from wsp_scraper.browser import login, navigate_to_schedule, find_next_unprocessed_row, scrape_row_schedule
 from wsp_scraper.db_service import save_subject_to_db
+from wsp_scraper.audit import log_dropped_item
 
 logging.basicConfig(
     level=logging.INFO,
@@ -38,7 +39,7 @@ async def main() -> None:
 
     async with async_playwright() as pw:
         # Production: headless=True if stable
-        browser = await pw.chromium.launch(headless=False)
+        browser = await pw.chromium.launch(headless=True)
         context = await browser.new_context(
             viewport={"width": 1600, "height": 900},
         )
@@ -56,8 +57,6 @@ async def main() -> None:
             processed_codes: set[str] = set()
             saved_count = 0
             no_new_count = 0
-            
-            TEST_LIMIT = 50
             
             scroll_container = page.locator(".v-table-body-wrapper")
             if await scroll_container.count() > 0:
@@ -79,7 +78,7 @@ async def main() -> None:
                         else:
                             await page.evaluate("window.scrollBy(0, 400)")
                             
-                        await page.wait_for_timeout(800)
+                        await page.wait_for_timeout(100)
                         continue
 
                     no_new_count = 0
@@ -98,6 +97,7 @@ async def main() -> None:
                             saved_count += 1
                         else:
                             log.info("Ghost subject skipped: %s", raw_code)
+                            log_dropped_item("subject", raw_code, "0 valid blocks", "")
 
                     except Exception as e:
                         log.exception("Error processing subject %s: %s", raw_code, e)
@@ -107,15 +107,10 @@ async def main() -> None:
                              await page.wait_for_timeout(3000)
 
                     processed_codes.add(clean_key)
-                    
-                    if saved_count >= TEST_LIMIT:
-                        log.info("Hit TEST_LIMIT (%d). Stopping.", TEST_LIMIT)
-                        break
             
             log.info("Scraping complete! %d subjects saved.", saved_count)
 
         finally:
-            await page.wait_for_timeout(3000)
             await browser.close()
             await engine.dispose()
 
