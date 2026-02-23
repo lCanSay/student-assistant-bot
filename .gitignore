@@ -9,3 +9,5 @@ recon_wsp.py
 /tests/
 *.log
 
+test.txt
+dropped_items.jsonl

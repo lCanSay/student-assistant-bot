@@ -199,14 +199,26 @@ elif page == "🧠 Лаборатория":
 elif page == "📅 Расписание":
     st.title("Просмотр Расписания WSP")
 
+    # --- Data Fetchers ---
     async def get_subjects():
         async with async_session() as session:
-            # Fetch subjects that have at least one event
             stmt = select(Subject).where(Subject.events.any()).order_by(Subject.code)
             result = await session.execute(stmt)
             return result.scalars().all()
 
-    async def get_schedule(subject_id: int):
+    async def get_instructors():
+        async with async_session() as session:
+            stmt = select(Instructor).where(Instructor.events.any()).order_by(Instructor.full_name)
+            result = await session.execute(stmt)
+            return result.scalars().all()
+
+    async def get_rooms():
+        async with async_session() as session:
+            stmt = select(Room).where(Room.events.any()).order_by(Room.number)
+            result = await session.execute(stmt)
+            return result.scalars().all()
+
+    async def get_schedule_by_subject(subject_id: int):
         async with async_session() as session:
             stmt = (
                 select(ScheduleEvent)
@@ -219,44 +231,188 @@ elif page == "📅 Расписание":
             result = await session.execute(stmt)
             return result.scalars().all()
 
-    subjects = run_async(get_subjects())
+    async def get_schedule_by_instructor(instructor_id: int):
+        async with async_session() as session:
+            stmt = (
+                select(ScheduleEvent)
+                .where(ScheduleEvent.instructor_id == instructor_id)
+                .options(
+                    selectinload(ScheduleEvent.subject),
+                    selectinload(ScheduleEvent.room)
+                )
+            )
+            result = await session.execute(stmt)
+            return result.scalars().all()
 
-    if not subjects:
-        st.warning("Нет предметов с расписанием.")
-    else:
-        # Create a mapping for the selectbox
-        subject_map = {s.id: f"{s.code} - {s.name_en or s.name_ru or 'No Name'}" for s in subjects}
-        selected_sub_id = st.selectbox("Выберите предмет:", options=subject_map.keys(), format_func=lambda x: subject_map[x])
+    async def get_schedule_by_room(room_id: int):
+        async with async_session() as session:
+            stmt = (
+                select(ScheduleEvent)
+                .where(ScheduleEvent.room_id == room_id)
+                .options(
+                    selectinload(ScheduleEvent.subject),
+                    selectinload(ScheduleEvent.instructor)
+                )
+            )
+            result = await session.execute(stmt)
+            return result.scalars().all()
 
-        if selected_sub_id:
-            events = run_async(get_schedule(selected_sub_id))
-            
-            if events:
-                data = []
-                for e in events:
-                    t_str = f"{e.start_time.strftime('%H:%M')} - {e.end_time.strftime('%H:%M')}"
+    # --- UI Tabs ---
+    tab_subj, tab_inst, tab_room = st.tabs(["📚 По предметам", "👨‍🏫 По преподавателям", "🚪 По аудиториям"])
+
+    day_sort_map = {"Mon": 1, "Tue": 2, "Wed": 3, "Thu": 4, "Fri": 5, "Sat": 6, "Sun": 7}
+
+    def format_time(e):
+        return f"{e.start_time.strftime('%H:%M')} - {e.end_time.strftime('%H:%M')}"
+
+    # TAB 1: SUBJECTS
+    with tab_subj:
+        subjects = run_async(get_subjects())
+        if not subjects:
+            st.warning("Нет предметов с расписанием.")
+        else:
+            df_subj = pd.DataFrame([
+                {
+                    "id": s.id,
+                    "Code": s.code,
+                    "Name (EN)": s.name_en or "",
+                    "Name (RU)": s.name_ru or "",
+                    "Name (KZ)": s.name_kz or "",
+                    "Department": s.department or "",
+                    "Credits": s.credits or "",
+                    "Formula": s.formula or "",
+                    "Year": s.year or "",
+                    "Period": s.period or ""
+                } for s in subjects
+            ])
+
+            st.write("Выберите предмет из списка (одна строка):")
+            sel_subj = st.dataframe(
+                df_subj,
+                use_container_width=True,
+                hide_index=True,
+                on_select="rerun",
+                selection_mode="single-row",
+                column_config={"id": None}
+            )
+
+            if sel_subj.selection.rows:
+                selected_idx = sel_subj.selection.rows[0]
+                selected_id = int(df_subj.iloc[selected_idx]['id'])
+                
+                events = run_async(get_schedule_by_subject(selected_id))
+                if events:
+                    data = []
+                    for e in events:
+                        data.append({
+                            "День": e.day_of_week.value,
+                            "Время": format_time(e),
+                            "Тип": e.lesson_type.value,
+                            "Преподаватель": e.instructor.full_name if e.instructor else "—",
+                            "Кабинет": e.room.number if e.room else "—",
+                            "Вместимость": e.group_info or "",
+                            "day_num": day_sort_map.get(e.day_of_week.value, 8)
+                        })
                     
-                    data.append({
-                        "День": e.day_of_week.value,
-                        "Время": t_str,
-                        "Тип": e.lesson_type.value,
-                        "Преподаватель": e.instructor.full_name if e.instructor else "—",
-                        "Кабинет": e.room.number if e.room else "—",
-                        "Вместимость": e.group_info or "",
-                        # Hidden sort key
-                        "_day_sort": {
-                            "Mon": 1, "Tue": 2, "Wed": 3, "Thu": 4, "Fri": 5, "Sat": 6, "Sun": 7
-                        }.get(e.day_of_week.value, 8)
-                    })
+                    df_events = pd.DataFrame(data).sort_values(by=["day_num", "Время"]).drop(columns=["day_num"])
+                    st.subheader("Расписание предмета")
+                    st.dataframe(df_events, use_container_width=True, hide_index=True)
+                else:
+                    st.info("Для этого предмета нет событий.")
+
+    # TAB 2: INSTRUCTORS
+    with tab_inst:
+        instructors = run_async(get_instructors())
+        if not instructors:
+            st.warning("Нет преподавателей с расписанием.")
+        else:
+            df_inst = pd.DataFrame([
+                {
+                    "id": i.id,
+                    "ФИО Преподавателя": i.full_name
+                } for i in instructors
+            ])
+
+            st.write("Выберите преподавателя:")
+            sel_inst = st.dataframe(
+                df_inst,
+                use_container_width=True,
+                hide_index=True,
+                on_select="rerun",
+                selection_mode="single-row",
+                column_config={"id": None}
+            )
+
+            if sel_inst.selection.rows:
+                selected_idx = sel_inst.selection.rows[0]
+                selected_id = int(df_inst.iloc[selected_idx]['id'])
                 
-                df = pd.DataFrame(data)
+                events = run_async(get_schedule_by_instructor(selected_id))
+                if events:
+                    data = []
+                    for e in events:
+                        subj_desc = f"{e.subject.code} - {e.subject.name_en or e.subject.name_ru or ''}" if e.subject else "—"
+                        data.append({
+                            "День": e.day_of_week.value,
+                            "Время": format_time(e),
+                            "Предмет": subj_desc,
+                            "Тип": e.lesson_type.value,
+                            "Кабинет": e.room.number if e.room else "—",
+                            "Вместимость": e.group_info or "",
+                            "day_num": day_sort_map.get(e.day_of_week.value, 8)
+                        })
+                    
+                    df_events = pd.DataFrame(data).sort_values(by=["day_num", "Время"]).drop(columns=["day_num"])
+                    st.subheader("Расписание преподавателя")
+                    st.dataframe(df_events, use_container_width=True, hide_index=True)
+                else:
+                    st.info("Для этого преподавателя нет событий.")
+
+    # TAB 3: ROOMS
+    with tab_room:
+        rooms = run_async(get_rooms())
+        if not rooms:
+            st.warning("Нет аудиторий с расписанием.")
+        else:
+            df_room = pd.DataFrame([
+                {
+                    "id": r.id,
+                    "Аудитория": r.number
+                } for r in rooms
+            ])
+
+            st.write("Выберите аудиторию:")
+            sel_room = st.dataframe(
+                df_room,
+                use_container_width=True,
+                hide_index=True,
+                on_select="rerun",
+                selection_mode="single-row",
+                column_config={"id": None}
+            )
+
+            if sel_room.selection.rows:
+                selected_idx = sel_room.selection.rows[0]
+                selected_id = int(df_room.iloc[selected_idx]['id'])
                 
-                # Sort chrono
-                df = df.sort_values(by=["_day_sort", "Время"])
-                df = df.drop(columns=["_day_sort"])
-                
-                st.write(f"Найдено событий: {len(events)}")
-                st.dataframe(df, use_container_width=True, hide_index=True)
-            else:
-                st.info("Для этого предмета нет событий.")
+                events = run_async(get_schedule_by_room(selected_id))
+                if events:
+                    data = []
+                    for e in events:
+                        subj_desc = f"{e.subject.code} - {e.subject.name_en or e.subject.name_ru or ''}" if e.subject else "—"
+                        data.append({
+                            "День": e.day_of_week.value,
+                            "Время": format_time(e),
+                            "Предмет": subj_desc,
+                            "Тип": e.lesson_type.value,
+                            "Преподаватель": e.instructor.full_name if e.instructor else "—",
+                            "Вместимость": e.group_info or "",
+                            "day_num": day_sort_map.get(e.day_of_week.value, 8)
+                        })
+                    
+                    df_events = pd.DataFrame(data).sort_values(by=["day_num", "Время"]).drop(columns=["day_num"])
+                    st.subheader("Расписание аудитории")
+                    st.dataframe(df_events, use_container_width=True, hide_index=True)
+                else:
+                    st.info("В этой аудитории нет событий.")
 
