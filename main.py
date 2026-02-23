@@ -5,6 +5,7 @@ from config import BOT_TOKEN
 
 from bot.handlers.commands import router as commands_router
 from bot.handlers.files import router as files_router
+from bot.handlers.schedule import router as schedule_router
 from bot.handlers.ai import router as ai_router
 from bot.middlewares.throttling import ThrottlingMiddleware
 
@@ -21,9 +22,10 @@ async def main():
 
     dp.include_router(commands_router)
     dp.include_router(files_router)
+    dp.include_router(schedule_router)
     dp.include_router(ai_router)
 
-    dp.message.middleware(ThrottlingMiddleware(ttl=5.0))
+    dp.message.middleware(ThrottlingMiddleware(ttl=3.0))
 
 
     print("Starting bot polling...")

@@ -42,7 +42,7 @@ class Subject(Base):
     name_kz: Mapped[Optional[str]] = mapped_column(String(255))
     name_en: Mapped[Optional[str]] = mapped_column(String(255))
     department: Mapped[Optional[str]] = mapped_column(String(255))
-    credits: Mapped[Optional[float]] = mapped_column(Float)       # Float: fractional credits possible
+    credits: Mapped[Optional[float]] = mapped_column(Float)
     formula: Mapped[Optional[str]] = mapped_column(String(20))    # e.g. "1/0/2" (Lec/Prac/Lab)
     year: Mapped[Optional[str]] = mapped_column(String(20))
     period: Mapped[Optional[str]] = mapped_column(String(50))
@@ -98,8 +98,8 @@ class ScheduleEvent(Base):
     lesson_type: Mapped[LessonType] = mapped_column(SAEnum(LessonType, name="lesson_type_enum"), nullable=False)
 
     group_info: Mapped[Optional[str]] = mapped_column(String(50))          # raw "(current/max)", e.g. "76/75"
-    student_count_current: Mapped[Optional[int]] = mapped_column(Integer)  # parsed from group_info
-    student_count_max: Mapped[Optional[int]] = mapped_column(Integer)      # parsed from group_info
+    student_count_current: Mapped[Optional[int]] = mapped_column(Integer)
+    student_count_max: Mapped[Optional[int]] = mapped_column(Integer)
     notes: Mapped[Optional[str]] = mapped_column(Text)
 
     subject: Mapped[Subject] = relationship("Subject", back_populates="events")
