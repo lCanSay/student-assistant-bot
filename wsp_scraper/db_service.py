@@ -21,7 +21,9 @@ LESSON_TYPE_MAP: dict[str, LessonType] = {
 }
 
 
+
 async def get_or_create_instructor(session: AsyncSession, name: str) -> Instructor:
+    """Retrieves an existing instructor or creates a new one if not found."""
     result = await session.execute(
         select(Instructor).where(Instructor.full_name == name)
     )
@@ -34,6 +36,7 @@ async def get_or_create_instructor(session: AsyncSession, name: str) -> Instruct
 
 
 async def get_or_create_room(session: AsyncSession, number: str) -> Room:
+    """Retrieves an existing room or creates a new one if not found."""
     result = await session.execute(
         select(Room).where(Room.number == number)
     )
@@ -46,6 +49,10 @@ async def get_or_create_room(session: AsyncSession, number: str) -> Room:
 
 
 async def save_subject_to_db(session: AsyncSession, entry: SubjectEntry) -> None:
+    """
+    Upserts a Subject and replaces its schedule if the new data is more complete.
+    Handles conflict resolution by comparing valid schedule block counts.
+    """
     base_code = "".join(ch for ch in entry.code if ch.isalnum())
     entry.code = base_code
 

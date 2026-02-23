@@ -20,7 +20,9 @@ WSP_LOGIN = os.getenv("WSP_LOGIN")
 WSP_PASSWORD = os.getenv("WSP_PASSWORD")
 TARGET_URL = "https://wsp.kbtu.kz/SubjectSchedule"
 
+
 async def login(page: Page) -> None:
+    """Log in to wsp.kbtu.kz via the Vaadin login view (in English)."""
     log.info("Navigating to login page...")
     await page.goto("https://wsp.kbtu.kz", wait_until="networkidle", timeout=30_000)
     await page.wait_for_timeout(3000)
@@ -29,14 +31,13 @@ async def login(page: Page) -> None:
     if await gb_flag.count() > 0:
         await gb_flag.first.click()
         log.info("Switched UI to English")
-        await page.wait_for_timeout(5000)
+        await page.wait_for_timeout(1000)
         await page.wait_for_load_state("networkidle", timeout=15_000)
 
     login_icon = page.locator("img[src*='login_24']")
     await login_icon.wait_for(state="visible", timeout=10_000)
     await login_icon.click()
     log.info("Clicked login icon")
-    await page.wait_for_timeout(3000)
 
     username_field = page.locator("input.v-filterselect-input")
     await username_field.wait_for(state="visible", timeout=10_000)
@@ -63,19 +64,21 @@ async def login(page: Page) -> None:
         log.warning("No login button found - pressing Enter")
         await password_field.press("Enter")
 
-    await page.wait_for_timeout(3000)
+    await page.wait_for_timeout(500)
     await page.wait_for_load_state("networkidle", timeout=15_000)
     log.info("Login complete: %s", page.url)
 
 
 async def navigate_to_schedule(page: Page) -> None:
+    """Navigate to the Subject Schedule page."""
     log.info("Navigating to %s", TARGET_URL)
     await page.goto(TARGET_URL, wait_until="networkidle", timeout=30_000)
-    await page.wait_for_timeout(3000)
+    await page.wait_for_timeout(1000)
     log.info("Schedule page loaded: %s", page.url)
 
 
 async def extract_row_metadata(cells: list[Locator], col_names: list[str]) -> dict:
+    """Extract metadata from a row's cells."""
     row_data: dict = {}
     for i, col in enumerate(col_names):
         if i < len(cells):
@@ -89,6 +92,10 @@ async def extract_row_metadata(cells: list[Locator], col_names: list[str]) -> di
 async def find_next_unprocessed_row(
     page: Page, processed_codes: set[str], col_names: list[str]
 ) -> tuple[Optional[Locator], Optional[dict]]:
+    """
+    Scan visible rows for the first one whose code hasn't been processed.
+    Returns (row_locator, subject_data_dict) or (None, None).
+    """
     rows = await page.locator(".v-table-body tr").all()
     
     for row in rows:
@@ -111,6 +118,10 @@ async def find_next_unprocessed_row(
 
 
 async def detect_schedule_layout(page: Page) -> list[tuple[DayOfWeek, Locator]]:
+    """
+    Detect day columns in the ScheduleView page.
+    Returns a list of (DayOfWeek, column_locator) for each day that has items.
+    """
     day_columns: list[tuple[DayOfWeek, Locator]] = []
     columns = page.locator("div.v-verticallayout[class*='v-border-left-1-bfbfbf']")
     col_count = await columns.count()
@@ -138,6 +149,7 @@ async def detect_schedule_layout(page: Page) -> list[tuple[DayOfWeek, Locator]]:
 async def scrape_row_schedule(
     page: Page, row_element: Locator, subject_data: dict
 ) -> SubjectEntry:
+    """Open the schedule for a given subject row, scrape blocks, then return."""
     code = subject_data["code"]
     name = subject_data.get("name_en") or subject_data.get("name_ru", "")
 
@@ -165,7 +177,7 @@ async def scrape_row_schedule(
     log.info("Scraping subject: %s (%s)", code, name)
 
     await row_element.dblclick()
-    await page.wait_for_timeout(5000)
+    await page.wait_for_timeout(1000)
 
     if "ScheduleView" not in page.url:
         log.warning("Did not navigate to ScheduleView for %s", code)
@@ -253,9 +265,9 @@ async def scrape_row_schedule(
     back_btn = page.locator("img[src*='arrow_left']")
     if await back_btn.count() > 0:
         await back_btn.first.click()
-        await page.wait_for_timeout(3000)
+        await page.wait_for_timeout(500)
     else:
         await page.go_back()
-        await page.wait_for_timeout(3000)
+        await page.wait_for_timeout(500)
 
     return entry

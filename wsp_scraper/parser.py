@@ -5,6 +5,7 @@ from datetime import time as dt_time
 from typing import Optional
 from core.wsp_models import DayOfWeek
 from .schemas import ParsedBlock
+from .audit import log_dropped_item
 
 log = logging.getLogger("scraper.parser")
 
@@ -61,6 +62,7 @@ def validate_block(block: ParsedBlock) -> bool:
         block.is_valid = False
         block.drop_reason = "Rule 1: Sunday ban"
         log.info("Dropped block due to Rule 1 (Sunday): %s", block.raw_text[:80])
+        log_dropped_item("block", block.subject_code, block.drop_reason, block.raw_text)
         return False
 
     cur = block.current_students
@@ -71,12 +73,14 @@ def validate_block(block: ParsedBlock) -> bool:
             block.is_valid = False
             block.drop_reason = f"Rule 2: capacity {cur}/{mx}"
             log.info("Dropped block due to Rule 2: %d/%d capacity — %s", cur if cur is not None else 0, mx, block.raw_text[:80])
+            log_dropped_item("block", block.subject_code, block.drop_reason, block.raw_text)
             return False
     elif cur is not None:
         if cur < 7:
             block.is_valid = False
             block.drop_reason = f"Rule 2: capacity ({cur})"
             log.info("Dropped block due to Rule 2: (%d) capacity — %s", cur, block.raw_text[:80])
+            log_dropped_item("block", block.subject_code, block.drop_reason, block.raw_text)
             return False
 
     return True
@@ -108,7 +112,9 @@ FIRST_SLOT_MIN = 0
 SCHEDULE_TIME_ORIGIN_TOP = 41
 SCHEDULE_PX_PER_HOUR = 40
 
+
 def derive_day_from_left(left_px: float, column_boundaries: list[tuple[float, float, DayOfWeek]]) -> Optional[DayOfWeek]:
+    """Map a CSS left offset to a DayOfWeek using detected column boundaries."""
     for lo, hi, day in column_boundaries:
         if lo <= left_px < hi:
             return day
@@ -121,6 +127,7 @@ def derive_times_from_css(
     origin_top: float,
     px_per_min: float,
 ) -> tuple[Optional[dt_time], Optional[dt_time]]:
+    """Convert CSS top/height to start_time/end_time."""
     if px_per_min <= 0:
         return None, None
 
