@@ -21,6 +21,9 @@ jobs:
       - name: Build Docker containers
         run: docker compose build
 
+      - name: Create dummy .env file
+        run: touch .env
+
       - name: Start Docker containers
         run: docker compose up -d
 
