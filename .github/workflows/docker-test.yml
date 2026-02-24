@@ -1,0 +1,36 @@
+name: Docker Build Test
+
+on:
+  push:
+    branches:
+      - main
+      - master
+  pull_request:
+    branches:
+      - main
+      - master
+
+jobs:
+  test-build:
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Build Docker containers
+        run: docker compose build
+
+      - name: Start Docker containers
+        run: docker compose up -d
+
+      - name: Check running containers
+        run: docker compose ps
+
+      - name: View container logs
+        run: |
+          docker logs kbtu_rag_bot
+          docker logs kbtu_rag_admin
+
+      - name: Stop and remove containers
+        run: docker compose down
