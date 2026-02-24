@@ -4,6 +4,7 @@ from core.database import async_session
 import services.repo as repo
 from services.ai_service import get_ai_answer
 from config import DAILY_LIMIT
+from bot.keyboards.feedback import get_feedback_keyboard
 
 router = Router()
 
@@ -54,16 +55,28 @@ async def ai_chat_handler(message: Message):
         
         await wait_msg.delete()
         
-        if "NO_INFO" in ai_reply:
+        if "NO_INFO" in ai_reply: #TODO refactor this whole block and change to new logic
             if valid_files:
                 await message.answer("ℹ️ Я нашел файлы по вашему запросу, но текстовой справки у меня пока нет.")
             else:
                 await message.answer("❌ К сожалению, я пока не знаю ответа на этот вопрос. Попробуйте переформулировать или обратитесь в деканат.")
         else:
-            await message.answer(ai_reply)
+            # Log interaction and attach feedback buttons
+            async with async_session() as session:
+                interaction_id = await repo.log_interaction(
+                    session, message.from_user.id, user_text, ai_reply
+                )
+            await message.answer(
+                ai_reply,
+                reply_markup=get_feedback_keyboard(interaction_id),
+            )
 
     except Exception as e:
-        await wait_msg.edit_text("⚠️ Ошибка обращения к AI серверу.")
+        try:
+            await wait_msg.delete()
+        except Exception:
+            pass
+        await message.answer("⚠️ Ошибка обращения к AI серверу.")
         print(f"AI Error: {e}")
     
     for file_item in valid_files:
@@ -74,3 +87,4 @@ async def ai_chat_handler(message: Message):
                 await message.answer_photo(photo=file_item.file_id)
         except Exception as e:
             print(f"Error sending file {file_item.caption}: {e}")
+

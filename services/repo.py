@@ -3,7 +3,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.engine import Result
 from datetime import datetime, timedelta, timezone
 from typing import Sequence
-from core.models import KnowledgeItem, FileItem, User
+from core.models import KnowledgeItem, FileItem, User, InteractionLog
 from services.embeddings import get_vector
 
 async def add_knowledge(session: AsyncSession, content: str, category: str, keywords: list[str] = None):
@@ -130,3 +130,33 @@ async def check_and_increment_quota(session: AsyncSession, user: User, limit: in
         return True
     else:
         return False
+
+
+async def log_interaction(
+    session: AsyncSession, telegram_id: int, user_query: str, bot_response: str
+) -> int:
+    """Insert an interaction record and return its ID."""
+    log = InteractionLog(
+        telegram_id=telegram_id,
+        user_query=user_query,
+        bot_response=bot_response,
+    )
+    session.add(log)
+    await session.flush()
+    interaction_id = log.id
+    await session.commit()
+    return interaction_id
+
+
+async def update_feedback(
+    session: AsyncSession, interaction_id: int, feedback_value: int
+) -> None:
+    """Update the feedback field for a given interaction."""
+    stmt = (
+        update(InteractionLog)
+        .where(InteractionLog.id == interaction_id)
+        .values(feedback=feedback_value)
+    )
+    await session.execute(stmt)
+    await session.commit()
+
