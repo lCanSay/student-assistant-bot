@@ -9,6 +9,7 @@ from dotenv import load_dotenv
 from sqlalchemy import select
 from sqlalchemy.orm import selectinload
 from core.wsp_models import Subject, ScheduleEvent, Instructor, Room
+from core.models import InteractionLog
 
 load_dotenv()
 
@@ -24,7 +25,7 @@ def run_async(coro):
 
 # Sidebar
 st.sidebar.title("Admin Panel")
-page = st.sidebar.radio("Navigation", ["📝 База Знаний", "📂 Файлы", "👥 Пользователи", "🧠 Лаборатория", "📅 Расписание"])
+page = st.sidebar.radio("Navigation", ["📝 База Знаний", "📂 Файлы", "👥 Пользователи", "💬 Обратная связь", "🧠 Лаборатория", "📅 Расписание"])
 
 # PAGE 1: KNOWLEDGE BASE
 if page == "📝 База Знаний":
@@ -133,7 +134,7 @@ elif page == "📂 Файлы":
     else:
         st.info("Файлов нет.")
 
-# PAGE 3: USERS
+# PAGE 3: USERS #TODO refactor users selection
 elif page == "👥 Пользователи":
     st.title("Пользователи и Квоты")
     
@@ -415,4 +416,58 @@ elif page == "📅 Расписание":
                     st.dataframe(df_events, use_container_width=True, hide_index=True)
                 else:
                     st.info("В этой аудитории нет событий.")
+
+# PAGE 6: ANALYTICS & FEEDBACK (RLHF)
+elif page == "💬 Обратная связь":
+    st.title("Обратная связь (RLHF)")
+
+    async def get_interaction_logs():
+        async with async_session() as session:
+            stmt = select(InteractionLog).order_by(InteractionLog.created_at.desc()).limit(1000)
+            result = await session.execute(stmt)
+            return result.scalars().all()
+
+    logs = run_async(get_interaction_logs())
+
+    if not logs:
+        st.info("Записей пока нет.")
+    else:
+        df = pd.DataFrame([
+            {
+                "id": l.id,
+                "created_at": l.created_at,
+                "telegram_id": l.telegram_id,
+                "user_query": l.user_query,
+                "bot_response": l.bot_response,
+                "feedback": l.feedback,
+            } for l in logs
+        ])
+
+        total = len(df)
+        likes = int((df["feedback"] == 1).sum())
+        dislikes = int((df["feedback"] == -1).sum())
+        no_feedback = int((df["feedback"] == 0).sum())
+
+        c1, c2, c3, c4 = st.columns(4)
+        c1.metric("Всего запросов", total)
+        c2.metric("👍 Лайков", likes)
+        c3.metric("👎 Дизлайков", dislikes)
+        c4.metric("🤷\u200d♂️ Без оценки", no_feedback)
+
+        st.divider()
+        st.subheader("Журнал дизлайков")
+
+        df_dislikes = df[df["feedback"] == -1].copy()
+
+        if df_dislikes.empty:
+            st.success("Дизлайков пока нет!")
+        else:
+            df_dislikes["created_at"] = pd.to_datetime(df_dislikes["created_at"]).dt.strftime("%d.%m.%Y %H:%M")
+            st.dataframe(
+                df_dislikes[["created_at", "user_query", "bot_response"]].rename(
+                    columns={"created_at": "Дата", "user_query": "Вопрос", "bot_response": "Ответ бота"}
+                ),
+                use_container_width=True,
+                hide_index=True,
+            )
 
