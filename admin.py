@@ -127,10 +127,55 @@ elif page == "📂 Файлы":
     
     if files:
         df_files = pd.DataFrame([
-            {"id": f.id, "name": f.file_unique_id, "caption": f.caption, "type": f.type}
+            {"id": f.id, "file_unique_id": f.file_unique_id, "caption": f.caption, "category": f.category, "type": f.type}
             for f in files
         ])
         st.dataframe(df_files, use_container_width=True)
+
+        c1, c2, c3 = st.columns(3)
+        with c1:
+            edit_file_id = st.number_input("ID для редактирования/удаления", min_value=1, step=1)
+
+        selected_file = next((f for f in files if f.id == edit_file_id), None)
+
+        if selected_file:
+            with st.form("edit_file_form"):
+                st.write(f"Редактирование Файла ID: {edit_file_id}")
+                
+                # Handle None values gracefully
+                curr_caption = selected_file.caption if selected_file.caption is not None else ""
+                curr_category = selected_file.category if selected_file.category is not None else ""
+                curr_type = selected_file.type if selected_file.type is not None else ""
+
+                edit_caption = st.text_input("Описание (Caption)", value=curr_caption)
+                edit_category = st.text_input("Категория (Category)", value=curr_category)
+                edit_type = st.text_input("Тип (Type)", value=curr_type)
+
+                c_save, c_del = st.columns(2)
+                with c_save:
+                    save_file_click = st.form_submit_button("💾 Сохранить изменения")
+                with c_del:
+                    del_file_click = st.form_submit_button("🗑 Удалить файл", type="primary")
+
+                if save_file_click:
+                    async def save_file_logic():
+                        async with async_session() as session:
+                            return await repo.update_file(session, edit_file_id, edit_caption, edit_category, edit_type)
+                    if run_async(save_file_logic()):
+                        st.success("Файл обновлён!")
+                        st.rerun()
+                    else:
+                        st.error("Ошибка при обновлении файла.")
+
+                if del_file_click:
+                    async def del_file_logic():
+                        async with async_session() as session:
+                            return await repo.delete_file(session, edit_file_id)
+                    if run_async(del_file_logic()):
+                        st.warning("Файл удалён!")
+                        st.rerun()
+                    else:
+                        st.error("Ошибка при удалении файла.")
     else:
         st.info("Файлов нет.")
 
@@ -159,6 +204,31 @@ elif page == "👥 Пользователи":
             for u in users
         ])
         st.dataframe(df_users, use_container_width=True)
+
+        c1, c2, c3 = st.columns(3)
+        with c1:
+            edit_user_id = st.number_input("Telegram ID пользователя", step=1, format="%d")
+
+        selected_user = next((u for u in users if u.telegram_id == edit_user_id), None)
+
+        if selected_user:
+            with st.form("edit_user_form"):
+                st.write(f"Редактирование Квоты Пользователя ID: {edit_user_id}")
+                
+                curr_requests = selected_user.requests_left if selected_user.requests_left is not None else 0
+                edit_quota = st.number_input("Осталось запросов (requests_left)", value=curr_requests, step=1)
+
+                save_user_click = st.form_submit_button("💾 Обновить квоту")
+
+                if save_user_click:
+                    async def save_user_logic():
+                        async with async_session() as session:
+                            return await repo.update_user_quota(session, edit_user_id, edit_quota)
+                    if run_async(save_user_logic()):
+                        st.success("Квота обновлена!")
+                        st.rerun()
+                    else:
+                        st.error("Ошибка при обновлении квоты.")
     else:
         st.info("Пользователей нет.")
 

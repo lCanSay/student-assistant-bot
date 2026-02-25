@@ -88,6 +88,26 @@ async def upsert_file(
     await session.commit()
 
 
+async def update_file(
+    session: AsyncSession, item_id: int, caption: str, category: str, file_type: str
+) -> bool:
+    stmt = (
+        update(FileItem)
+        .where(FileItem.id == item_id)
+        .values(caption=caption, category=category, type=file_type)
+    )
+    result = await session.execute(stmt)
+    await session.commit()
+    return result.rowcount > 0
+
+
+async def delete_file(session: AsyncSession, item_id: int) -> bool:
+    stmt = delete(FileItem).where(FileItem.id == item_id)
+    result = await session.execute(stmt)
+    await session.commit()
+    return result.rowcount > 0
+
+
 async def get_files_by_category(session: AsyncSession, category: str) -> list[FileItem]:
     """Fetch all files that belong to a given category."""
     stmt = select(FileItem).where(FileItem.category == category)
@@ -125,6 +145,20 @@ async def get_or_create_user(session: AsyncSession, telegram_id: int, full_name:
         
     await session.commit()
     return user
+
+
+async def update_user_quota(
+    session: AsyncSession, telegram_id: int, requests_left: int
+) -> bool:
+    stmt = (
+        update(User)
+        .where(User.telegram_id == telegram_id)
+        .values(requests_left=requests_left)
+    )
+    result = await session.execute(stmt)
+    await session.commit()
+    return result.rowcount > 0
+
 
 async def check_and_increment_quota(session: AsyncSession, user: User, limit: int = None) -> bool:
     if limit is None:
