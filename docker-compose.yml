@@ -33,7 +33,7 @@ services:
   admin:
     image: kbtu_rag_app:latest
     container_name: kbtu_rag_admin
-    command: streamlit run app.py
+    command: streamlit run admin.py
     ports:
       - "8501:8501"
     env_file:

@@ -1,6 +1,8 @@
-from sqlalchemy import select, case, or_
+from sqlalchemy import select, case, or_, and_
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
+from datetime import datetime, timedelta
+from zoneinfo import ZoneInfo
 
 from core.wsp_models import ScheduleEvent, Subject, Instructor, Room, DayOfWeek
 
@@ -78,3 +80,38 @@ async def search_schedule_by_subject(
     )
     result = await session.execute(stmt)
     return list(result.scalars().all())
+
+
+async def get_currently_free_rooms(session: AsyncSession) -> list[str]:
+    """
+    Find rooms that are currently free.
+    If during a break (>= 50 mins), looks ahead 15 mins to find rooms free for the NEXT class block.
+    """
+    tz = ZoneInfo("Asia/Almaty")
+    now = datetime.now(tz)
+    
+    # Heuristic to fix the X:50 - Y:00 break gap:
+    if now.minute >= 50:
+        target_time = now + timedelta(minutes=15)
+    else:
+        target_time = now
+        
+    current_day = target_time.strftime("%A").upper() # Outputs 'MONDAY', 'TUESDAY', etc.
+    check_time = target_time.time()
+
+    # Query rooms that DO NOT have an event overlapping with check_time
+    stmt = (
+        select(Room.number)
+        .where(
+            ~Room.events.any(
+                and_(
+                    ScheduleEvent.day_of_week == current_day,
+                    ScheduleEvent.start_time <= check_time,
+                    ScheduleEvent.end_time >= check_time
+                )
+            )
+        )
+        .order_by(Room.number)
+    )
+    result = await session.execute(stmt)
+    return result.scalars().all()

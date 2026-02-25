@@ -6,8 +6,14 @@ def get_main_keyboard() -> ReplyKeyboardMarkup:
     kb_list = [
         [
             KeyboardButton(text="📅 Расписание"),
+            KeyboardButton(text="🚪 Свободные аудитории"),
             KeyboardButton(text="❓ Помощь"),
-        ]
+        ],
+        [
+            KeyboardButton(text="🗺 Карта КБТУ"),
+            KeyboardButton(text="📅 Академ. календарь"),
+            KeyboardButton(text="📚 РУПы"),
+        ],
     ]
     return ReplyKeyboardMarkup(
         keyboard=kb_list,
