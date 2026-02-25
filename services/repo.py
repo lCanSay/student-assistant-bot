@@ -4,6 +4,7 @@ from sqlalchemy.engine import Result
 from datetime import datetime, timedelta, timezone
 from typing import Sequence
 from core.models import KnowledgeItem, FileItem, User, InteractionLog
+
 from services.embeddings import get_vector
 
 async def add_knowledge(session: AsyncSession, content: str, category: str, keywords: list[str] = None):
@@ -47,7 +48,15 @@ async def delete_knowledge(session: AsyncSession, item_id: int) -> bool:
     await session.commit()
     return result.rowcount > 0
 
-async def upsert_file(session: AsyncSession, file_id: str, file_unique_id: str, file_name: str, caption: str, file_type: str):
+async def upsert_file(
+    session: AsyncSession,
+    file_id: str,
+    file_unique_id: str,
+    file_name: str,
+    caption: str,
+    file_type: str,
+    category: str | None = None,
+):
     
     clean_caption = caption or ""
     embedding_text = f"Filename: {file_name}. Description: {clean_caption}"
@@ -63,17 +72,27 @@ async def upsert_file(session: AsyncSession, file_id: str, file_unique_id: str, 
         existing_item.caption = clean_caption
         existing_item.type = file_type
         existing_item.embedding = vector
+        if category is not None:
+            existing_item.category = category
     else:
         item = FileItem(
             file_id=file_id,
             file_unique_id=file_unique_id,
             caption=clean_caption,
             type=file_type,
-            embedding=vector
+            embedding=vector,
+            category=category,
         )
         session.add(item)
     
     await session.commit()
+
+
+async def get_files_by_category(session: AsyncSession, category: str) -> list[FileItem]:
+    """Fetch all files that belong to a given category."""
+    stmt = select(FileItem).where(FileItem.category == category)
+    result = await session.execute(stmt)
+    return result.scalars().all()
 
 async def search_knowledge(session: AsyncSession, query: str, limit: int = 3):
     query_vector = get_vector(query, is_query=True)

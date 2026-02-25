@@ -30,6 +30,7 @@ class FileItem(Base):
     file_unique_id: Mapped[str] = mapped_column(String, unique=True, nullable=False)
     caption: Mapped[Optional[str]] = mapped_column(Text)
     type: Mapped[Optional[str]] = mapped_column(String)
+    category: Mapped[Optional[str]] = mapped_column(String, index=True)
     embedding: Mapped[Any] = mapped_column(Vector(768), nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now()
