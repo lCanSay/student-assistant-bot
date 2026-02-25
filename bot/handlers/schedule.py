@@ -11,6 +11,7 @@ from services.wsp_repo import (
     search_schedule_by_instructor,
     search_schedule_by_room,
     search_schedule_by_subject,
+    get_currently_free_rooms,
 )
 from utils.formatters import format_schedule
 
@@ -28,6 +29,23 @@ async def cmd_schedule(message: Message, state: FSMContext):
     await message.answer(
         "📅 Поиск расписания\nВыберите тип поиска:",
         reply_markup=schedule_main_kb,
+    )
+
+
+@router.message(F.text == "🚪 Свободные аудитории")
+async def cmd_free_rooms(message: Message, state: FSMContext):
+    await state.clear()
+    async with async_session() as session:
+        free_rooms = await get_currently_free_rooms(session)
+        
+    if not free_rooms:
+        await message.answer("Сейчас свободных аудиторий нет.")
+        return
+        
+    rooms_str = ", ".join(free_rooms)
+    await message.answer(
+        f"🚪 *Аудитории, свободные в данный момент (с учетом перемен):*\n\n{rooms_str}",
+        parse_mode=ParseMode.MARKDOWN
     )
 
 
