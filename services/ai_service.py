@@ -42,7 +42,7 @@ async def get_ai_answer(user_question: str, context: str) -> str:
                     "content": user_content,
                 }
             ],
-            model="llama-3.3-70b-versatile",
+            model="llama-3.1-8b-instant",
             temperature=0.3,
             max_tokens=1024,
         )
