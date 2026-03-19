@@ -13,7 +13,7 @@ This guide explains how to run the project locally using Docker, allowing you to
 
 2.  **Start Services**:
     Run the following command in your terminal:
-    ```bash
+```bash
     docker compose up --build
     ```
     This will start:

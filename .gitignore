@@ -10,6 +10,6 @@ recon_wsp.py
 *.log
 test.txt
 dropped_items.jsonl
-
+/postgres_data
 test.txt
 dropped_items.jsonl
