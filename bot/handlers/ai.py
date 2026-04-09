@@ -1,3 +1,5 @@
+import re
+
 from aiogram import Router
 from aiogram.types import Message
 
@@ -9,6 +11,20 @@ from services.ai_service import get_ai_answer
 
 router = Router()
 
+_VALID_QUERY_RE = re.compile(r'[a-zA-Zа-яА-ЯёЁәғқңөұүһіӘҒҚҢӨҰҮҺІ]')
+
+
+def _is_valid_query(text: str) -> bool:
+    """Return True if the text looks like a real user question."""
+    stripped = text.strip()
+    if len(stripped) < 3:
+        return False
+    if stripped.isdigit():
+        return False
+    if not _VALID_QUERY_RE.search(stripped):
+        return False
+    return True
+
 
 @router.message()
 async def ai_chat_handler(message: Message):
@@ -17,6 +33,13 @@ async def ai_chat_handler(message: Message):
     Uses RAG (Vector Search) + Groq API + File Sending.
     """
     user_text = message.text or ""
+
+    # --- Input pre-filter (no DB, no quota) ---
+    if not _is_valid_query(user_text):
+        await message.answer(
+            "Пожалуйста, введите осмысленный вопрос (минимум 3 символа)."
+        )
+        return
 
     async with async_session() as session:
         # Ensure user exists (in case they didn't press /start)
@@ -27,64 +50,68 @@ async def ai_chat_handler(message: Message):
             username=message.from_user.username,
         )
 
-        # Check Quota
-        allowed = await repo.check_and_increment_quota(session, user)
-        if not allowed:
-            await session.refresh(user)
-            await message.answer(
-                f"Limit reached ({DAILY_LIMIT} requests/24h). Access restores at {user.quota_reset_at}."
-            )
-            return
-
-        # Search Knowledge Base (Vector Search)
+        # --- Vector search (no quota consumed yet) ---
         knowledge_with_score = await repo.search_knowledge(session, user_text, limit=3)
-        knowledge_items = [(item, dist) for item, dist in knowledge_with_score if dist <= 0.4]
+        knowledge_items = [(item, dist) for item, dist in knowledge_with_score if dist <= 0.35]
 
-        # Build structured context with metadata labels
+        # Build context from matched chunks (no metadata labels)
         context_parts = []
-        for i, (item, dist) in enumerate(knowledge_items, 1):
-            context_parts.append(f"[Источник {i} | Тема: {item.category}]\n{item.content}")
+        for item, dist in knowledge_items:
+            context_parts.append(item.content)
         context = "\n\n---\n\n".join(context_parts)
 
         found_files_with_score = await repo.search_files(session, user_text, limit=3)
 
-        # Filter by threshold (distance <= 0.5 means good match)
         valid_files = []
         # for file_item, distance in found_files_with_score: TODO uncomment later
         #     if distance <= 0.2:
         #         valid_files.append(file_item)
 
-    wait_msg = await message.answer("⏳ Думаю...")
-    try:
+        # --- No context found: respond without consuming quota or LLM ---
         if not context:
-            ai_reply = "NO_INFO"
-        else:
-            ai_reply = await get_ai_answer(user_text, context)
-
-        await wait_msg.delete()
-
-        if (
-            "NO_INFO" in ai_reply
-        ):  # TODO refactor this whole block and change to new logic
             if valid_files:
                 await message.answer(
                     "ℹ️ Я нашел файлы по вашему запросу, но текстовой справки у меня пока нет."
                 )
             else:
                 await message.answer(
-                    "❌ К сожалению, я пока не знаю ответа на этот вопрос. Попробуйте переформулировать или обратитесь в деканат."
+                    "К сожалению, у меня пока нет информации по этому вопросу. "
+                    "Попробуйте переформулировать или обратитесь в деканат."
                 )
-        else:
-            # Log interaction and attach feedback buttons
-            async with async_session() as session:
-                interaction_id = await repo.log_interaction(
-                    session, message.from_user.id, user_text, ai_reply
-                )
-            await message.answer(
-                ai_reply,
-                reply_markup=get_feedback_keyboard(interaction_id),
-            )
+            for file_item in valid_files:
+                try:
+                    if file_item.type == "document":
+                        await message.answer_document(document=file_item.file_id)
+                    elif file_item.type == "photo":
+                        await message.answer_photo(photo=file_item.file_id)
+                except Exception as e:
+                    print(f"Error sending file {file_item.caption}: {e}")
+            return
 
+        # --- Context found: NOW consume quota ---
+        allowed = await repo.check_and_increment_quota(session, user)
+        if not allowed:
+            await session.refresh(user)
+            await message.answer(
+                f"Лимит исчерпан ({DAILY_LIMIT} запросов/24ч). "
+                f"Доступ восстановится в {user.quota_reset_at}."
+            )
+            return
+
+    # --- Call LLM ---
+    wait_msg = await message.answer("⏳ Думаю...")
+    try:
+        ai_reply = await get_ai_answer(user_text, context)
+        await wait_msg.delete()
+
+        async with async_session() as session:
+            interaction_id = await repo.log_interaction(
+                session, message.from_user.id, user_text, ai_reply
+            )
+        await message.answer(
+            ai_reply,
+            reply_markup=get_feedback_keyboard(interaction_id),
+        )
     except Exception as e:
         try:
             await wait_msg.delete()

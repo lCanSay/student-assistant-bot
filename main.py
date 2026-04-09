@@ -12,9 +12,9 @@ from bot.middlewares.throttling import ThrottlingMiddleware
 
 from sqlalchemy import text
 from core.database import engine, Base
-# Ensure all models are imported so Base.metadata knows about them
-import core.models  # noqa: F401
-import core.wsp_models  # noqa: F401
+
+import core.models
+import core.wsp_models
 
 logging.basicConfig(level=logging.INFO)
 
