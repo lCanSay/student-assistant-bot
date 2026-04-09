@@ -54,10 +54,13 @@ async def ai_chat_handler(message: Message):
         knowledge_with_score = await repo.search_knowledge(session, user_text, limit=3)
         knowledge_items = [(item, dist) for item, dist in knowledge_with_score if dist <= 0.35]
 
-        # Build context from matched chunks (no metadata labels)
+        # Build context: include title as a header when available
         context_parts = []
         for item, dist in knowledge_items:
-            context_parts.append(item.content)
+            if item.title:
+                context_parts.append(f"[{item.title}]\n{item.content}")
+            else:
+                context_parts.append(item.content)
         context = "\n\n---\n\n".join(context_parts)
 
         found_files_with_score = await repo.search_files(session, user_text, limit=3)
