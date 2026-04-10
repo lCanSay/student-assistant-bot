@@ -23,10 +23,17 @@ async def main():
         print("Error: BOT_TOKEN not found in .env file.")
         return
 
-    # Ensure database tables exist
+    # Ensure database tables exist and migrate schema
     async with engine.begin() as conn:
         await conn.execute(text("CREATE EXTENSION IF NOT EXISTS vector"))
         await conn.run_sync(Base.metadata.create_all)
+        # Idempotent migrations: add new columns to knowledge_base if missing
+        for stmt in [
+            "ALTER TABLE knowledge_base ADD COLUMN IF NOT EXISTS title VARCHAR(255)",
+            "ALTER TABLE knowledge_base ADD COLUMN IF NOT EXISTS keywords TEXT[]",
+            "ALTER TABLE knowledge_base ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ",
+        ]:
+            await conn.execute(text(stmt))
     print("Database tables ready.")
 
     # Initialize Bot and Dispatcher

@@ -30,71 +30,97 @@ page = st.sidebar.radio("Navigation", ["📝 База Знаний", "📂 Фа�
 # PAGE 1: KNOWLEDGE BASE
 if page == "📝 База Знаний":
     st.title("Управление Базой Знаний")
-    
+
     # 1. Add New
     with st.expander("➕ Добавить новую запись"):
         with st.form("add_new_form"):
-            new_cat = st.text_input("Категория (Topic)", value="General")
-            new_keywords = st.text_input("Ключевые слова (Keywords)")
+            new_title = st.text_input("Название (Title)", placeholder="напр. Retake / Пересдача")
+            new_cat = st.text_input("Категория (Category)", value="General", placeholder="напр. Учебный процесс")
+            new_keywords = st.text_input("Ключевые слова (Keywords)", placeholder="через запятую: retake, пересдача, fx")
             new_content = st.text_area("Содержание (Content)")
-            
+
             submitted = st.form_submit_button("Сохранить")
             if submitted and new_content:
+                kw_list = [kw.strip() for kw in new_keywords.split(",") if kw.strip()] if new_keywords else None
                 async def add_logic():
                     async with async_session() as session:
-                        await repo.add_knowledge(session, new_content, new_cat, new_keywords)
+                        await repo.add_knowledge(session, new_content, new_cat, new_title or None, kw_list)
                 run_async(add_logic())
                 st.success("Запись добавлена!")
                 st.rerun()
 
     # 2. View & Edit
     st.subheader("Список записей")
-    
+
     async def get_data():
         async with async_session() as session:
             return await repo.get_all_knowledge(session, limit=100)
-    
+
     items = run_async(get_data())
-    
+
     if items:
         df = pd.DataFrame([
-            {"id": i.id, "category": i.category, "content": i.content} 
+            {
+                "id": i.id,
+                "title": i.title or "",
+                "category": i.category or "",
+                "keywords": ", ".join(i.keywords) if i.keywords else "",
+                "content": i.content[:120] + "…" if len(i.content) > 120 else i.content,
+                "updated_at": i.updated_at.strftime("%d.%m.%Y %H:%M") if i.updated_at else "—",
+            }
             for i in items
         ])
-        
+
         st.dataframe(
             df,
             column_config={
-                "id": st.column_config.NumberColumn(format="%d"),
+                "id": st.column_config.NumberColumn(format="%d", width="small"),
+                "title": st.column_config.TextColumn("Название"),
                 "category": st.column_config.TextColumn("Категория"),
-                "content": st.column_config.TextColumn("Содержание", width="large")
+                "keywords": st.column_config.TextColumn("Ключевые слова"),
+                "content": st.column_config.TextColumn("Содержание (превью)", width="large"),
+                "updated_at": st.column_config.TextColumn("Обновлено", width="small"),
             },
             hide_index=True,
-            use_container_width=True
+            use_container_width=True,
         )
 
         c1, c2, c3 = st.columns(3)
         with c1:
             edit_id = st.number_input("ID для редактирования/удаления", min_value=1, step=1)
-        
+
         selected_item = next((x for x in items if x.id == edit_id), None)
-        
+
         if selected_item:
             with st.form("edit_form"):
                 st.write(f"Редактирование ID: {edit_id}")
-                edit_cat = st.text_input("Категория", value=selected_item.category)
+                edit_title = st.text_input("Название (Title)", value=selected_item.title or "")
+                edit_cat = st.text_input("Категория (Category)", value=selected_item.category or "")
+                edit_keywords = st.text_input(
+                    "Ключевые слова (Keywords)",
+                    value=", ".join(selected_item.keywords) if selected_item.keywords else "",
+                    placeholder="через запятую",
+                )
                 edit_content = st.text_area("Содержание", value=selected_item.content)
-                
+
                 c_save, c_del = st.columns(2)
                 with c_save:
                     save_click = st.form_submit_button("💾 Сохранить изменения")
                 with c_del:
                     del_click = st.form_submit_button("🗑 Удалить запись", type="primary")
-                
+
                 if save_click:
+                    kw_list = [kw.strip() for kw in edit_keywords.split(",") if kw.strip()] if edit_keywords else None
                     async def save_logic():
                         async with async_session() as session:
-                            return await repo.update_knowledge(session, edit_id, edit_content, edit_cat)
+                            return await repo.update_knowledge(
+                                session,
+                                edit_id,
+                                edit_content,
+                                edit_cat or None,
+                                edit_title or None,
+                                kw_list,
+                            )
                     if run_async(save_logic()):
                         st.success("Обновлено!")
                         st.rerun()
