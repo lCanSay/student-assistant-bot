@@ -330,6 +330,11 @@ elif page == "🧠 Лаборатория":
 
                     # File search diagnostics
                     st.subheader("Файлы (vector search)")
+                    from bot.handlers.ai import (
+                        _filter_fallback_files,
+                        _MAX_FALLBACK_DISTANCE,
+                        _MIN_GAP,
+                    )
                     file_hits = await repo.search_files(session, query, limit=5)
                     if file_hits:
                         for file_item, dist in file_hits:
@@ -346,13 +351,40 @@ elif page == "🧠 Лаборатория":
                             cols[2].write(
                                 f"✅ kw: {keywords_hit}" if keywords_hit else "⛔ no keyword match"
                             )
-                        if len(file_hits) > 1:
-                            top_dist = file_hits[0][1]
-                            second_dist = file_hits[1][1]
-                            gap = second_dist - top_dist
-                            st.caption(
-                                f"Gap top→second: {gap:.4f} "
-                                f"({'✅ ≥0.05' if gap >= 0.05 else '⛔ <0.05 — ambiguous'})"
+
+                        # Show the real filter decision (same logic the bot uses)
+                        kw_matched = [
+                            (f, d) for f, d in file_hits
+                            if (f.keywords or [])
+                            and any(k.lower() in query.lower() for k in f.keywords)
+                        ]
+                        selected = _filter_fallback_files(file_hits, query)
+                        if selected:
+                            f = selected[0]
+                            st.success(
+                                f"🎯 Filter selects: **#{f.id} {f.title or f.caption}** "
+                                f"(dist ≤ {_MAX_FALLBACK_DISTANCE})"
+                            )
+                        else:
+                            reasons = []
+                            if not kw_matched:
+                                reasons.append("no file has a keyword in the query")
+                            else:
+                                top_f, top_d = kw_matched[0]
+                                if top_d > _MAX_FALLBACK_DISTANCE:
+                                    reasons.append(
+                                        f"top keyword-match distance {top_d:.4f} > {_MAX_FALLBACK_DISTANCE}"
+                                    )
+                                if len(kw_matched) > 1:
+                                    _, sd = kw_matched[1]
+                                    gap = sd - top_d
+                                    if gap < _MIN_GAP:
+                                        reasons.append(
+                                            f"gap among kw-matched files {gap:.4f} < {_MIN_GAP}"
+                                        )
+                            st.warning(
+                                "⛔ Filter rejects all candidates — "
+                                + "; ".join(reasons or ["(unknown)"])
                             )
                     else:
                         st.info("Файлы не найдены.")
