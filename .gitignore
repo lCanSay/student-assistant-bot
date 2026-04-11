@@ -1,8 +1,6 @@
 /venv
 .env
 /__pycache__
-/data/*
-!/data/faq.json
 *__pycache__
 recon_wsp.py
 /.agent/
