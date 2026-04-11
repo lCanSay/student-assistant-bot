@@ -115,12 +115,15 @@ async def ai_chat_handler(message: Message):
                     curated_files.append(f)
                     seen_file_ids.add(f.id)
 
-        # --- Fallback vector search (only when zero knowledge matched) ---
-        # Applies strict 3-gate filter; returns at most one file.
-        fallback_files: list = []
-        if not knowledge_items:
-            file_candidates = await repo.search_files(session, user_text, limit=3)
-            fallback_files = _filter_fallback_files(file_candidates, user_text)
+        # --- File vector search (always runs; strict 3-gate filter) ---
+        # Returns at most one file. Runs even when knowledge matched so that
+        # a clearly-relevant file isn't silently dropped because an unrelated
+        # knowledge entry absorbed the query.
+        file_candidates = await repo.search_files(session, user_text, limit=5)
+        fallback_files = [
+            f for f in _filter_fallback_files(file_candidates, user_text)
+            if f.id not in seen_file_ids
+        ]
 
         valid_files = curated_files + fallback_files
 
