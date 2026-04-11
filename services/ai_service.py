@@ -1,25 +1,60 @@
-from groq import AsyncGroq
+import logging
+
+from groq import (
+    AsyncGroq,
+    APIConnectionError,
+    APITimeoutError,
+    InternalServerError,
+    RateLimitError,
+)
+
 from config import GROQ_API_KEY
 
-client = None
+logger = logging.getLogger(__name__)
 
-def get_client():
-    global client
-    if client is None:
-        if GROQ_API_KEY:
-            client = AsyncGroq(api_key=GROQ_API_KEY)
-    return client
+# Single source of truth. Primary first, fallbacks in preference order.
+# To change the primary model, update MODELS[0] only.
+MODELS: list[str] = [
+    "llama-3.3-70b-versatile",
+    "openai/gpt-oss-20b",
+    "qwen/qwen3-32b",
+    "llama-3.1-8b-instant",
+]
 
-async def get_ai_answer(user_question: str, context: str) -> str:
-    client = get_client()
-    if not client:
-        return "⚠️ Ошибка: API ключ не найден. Пожалуйста, настройте GROQ_API_KEY."
+# Errors where switching to another model makes sense.
+_TRANSIENT_ERRORS = (
+    RateLimitError,
+    InternalServerError,
+    APIConnectionError,
+    APITimeoutError,
+)
 
-    knowledge_block = f"<knowledge>\n{context}\n</knowledge>" if context else ""
 
-    system_prompt = (
+class AllModelsUnavailableError(Exception):
+    """Raised when every model in MODELS failed with a transient error."""
+
+
+class AIConfigError(Exception):
+    """Raised when the AI service is misconfigured (e.g. no API key)."""
+
+
+_client: AsyncGroq | None = None
+
+
+def get_client() -> AsyncGroq:
+    global _client
+    if _client is None:
+        if not GROQ_API_KEY:
+            raise AIConfigError("GROQ_API_KEY is not configured")
+        _client = AsyncGroq(api_key=GROQ_API_KEY)
+    return _client
+
+
+def _build_system_prompt(context: str) -> str:
+    knowledge_block = f"<knowledge>\n{context}\n</knowledge>\n\n" if context else ""
+    return (
         "Ты — Асия, помощник студента КБТУ.\n\n"
-        + (knowledge_block + "\n\n" if knowledge_block else "")
+        + knowledge_block
         + "ИНСТРУКЦИИ:\n"
         "1. Отвечай ИСКЛЮЧИТЕЛЬНО на основе текста внутри <knowledge>. "
         "Не добавляй ничего, чего нет в <knowledge>. Не придумывай шаги, условия, сроки.\n"
@@ -33,24 +68,46 @@ async def get_ai_answer(user_question: str, context: str) -> str:
         "'Я Асия, помощник студента КБТУ. Задайте вопрос по учёбе.'\n"
     )
 
-    user_content = user_question
 
-    try:
-        chat_completion = await client.chat.completions.create(
-            messages=[
-                {
-                    "role": "system",
-                    "content": system_prompt,
-                },
-                {
-                    "role": "user",
-                    "content": user_content,
-                }
-            ],
-            model="llama-3.3-70b-versatile", #interchangeble with llama-3.1-8b-instant
-            temperature=0.3,
-            max_tokens=1024,
-        )
-        return chat_completion.choices[0].message.content
-    except Exception as e:
-        return f"⚠️ Произошла ошибка при обращении к AI: {str(e)}"
+async def get_ai_answer(user_question: str, context: str) -> str:
+    """
+    Try each model in MODELS until one succeeds.
+
+    Raises:
+        AIConfigError: API key missing.
+        AllModelsUnavailableError: every model hit a transient error.
+        Any non-transient groq exception (BadRequest, Authentication, etc.):
+            re-raised immediately — these won't be fixed by retrying.
+    """
+    client = get_client()
+    system_prompt = _build_system_prompt(context)
+    messages = [
+        {"role": "system", "content": system_prompt},
+        {"role": "user", "content": user_question},
+    ]
+
+    last_error: Exception | None = None
+    for model in MODELS:
+        try:
+            completion = await client.chat.completions.create(
+                messages=messages,
+                model=model,
+                temperature=0.3,
+                max_tokens=1024,
+            )
+            if model != MODELS[0]:
+                logger.warning("Answered via fallback model %s", model)
+            return completion.choices[0].message.content
+        except _TRANSIENT_ERRORS as e:
+            last_error = e
+            logger.warning(
+                "Model %s failed with transient error %s: %s; trying next",
+                model, type(e).__name__, e,
+            )
+            continue
+        # Any other groq exception (BadRequest, Authentication, NotFound, ...)
+        # is permanent — propagate so we don't mask config/code bugs.
+
+    raise AllModelsUnavailableError(
+        f"All {len(MODELS)} models unavailable. Last error: {last_error!r}"
+    ) from last_error

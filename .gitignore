@@ -6,6 +6,8 @@
 *__pycache__
 recon_wsp.py
 /.agent/
+/.claude/
+/.pytest_cache/
 /tests/
 *.log
 test.txt

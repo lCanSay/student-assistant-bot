@@ -1,3 +1,4 @@
+import logging
 import re
 
 from aiogram import Router
@@ -7,7 +8,16 @@ import services.repo as repo
 from bot.keyboards.feedback import get_feedback_keyboard
 from config import DAILY_LIMIT
 from core.database import async_session
-from services.ai_service import get_ai_answer
+from services.ai_service import AIConfigError, AllModelsUnavailableError, get_ai_answer
+
+logger = logging.getLogger(__name__)
+
+
+async def _safe_delete(msg: Message) -> None:
+    try:
+        await msg.delete()
+    except Exception:
+        pass
 
 router = Router()
 
@@ -105,23 +115,32 @@ async def ai_chat_handler(message: Message):
     wait_msg = await message.answer("⏳ Думаю...")
     try:
         ai_reply = await get_ai_answer(user_text, context)
-        await wait_msg.delete()
-
-        async with async_session() as session:
-            interaction_id = await repo.log_interaction(
-                session, message.from_user.id, user_text, ai_reply
-            )
-        await message.answer(
-            ai_reply,
-            reply_markup=get_feedback_keyboard(interaction_id),
-        )
-    except Exception as e:
-        try:
-            await wait_msg.delete()
-        except Exception:
-            pass
+    except AllModelsUnavailableError as e:
+        await _safe_delete(wait_msg)
+        await message.answer("⚠️ Серверы сейчас перегружены. Пожалуйста, попробуйте позже.")
+        logger.warning("All models unavailable for user %s: %s", message.from_user.id, e)
+        return
+    except AIConfigError as e:
+        await _safe_delete(wait_msg)
+        await message.answer("⚠️ Сервис временно недоступен.")
+        logger.error("AI misconfigured: %s", e)
+        return
+    except Exception:
+        await _safe_delete(wait_msg)
         await message.answer("⚠️ Ошибка обращения к AI серверу.")
-        print(f"AI Error: {e}")
+        logger.exception("Unexpected AI error for user %s", message.from_user.id)
+        return
+
+    await _safe_delete(wait_msg)
+
+    async with async_session() as session:
+        interaction_id = await repo.log_interaction(
+            session, message.from_user.id, user_text, ai_reply
+        )
+    await message.answer(
+        ai_reply,
+        reply_markup=get_feedback_keyboard(interaction_id),
+    )
 
     for file_item in valid_files:
         try:
