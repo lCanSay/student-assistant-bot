@@ -1,8 +1,9 @@
 from sqlalchemy import select, update, delete, func
+from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 from datetime import datetime, timedelta, timezone
 from typing import Sequence
-from core.models import KnowledgeItem, FileItem, User, InteractionLog
+from core.models import KnowledgeItem, FileItem, User, InteractionLog, knowledge_file_links
 
 from services.embeddings import get_vector, build_enriched_text
 
@@ -82,10 +83,14 @@ async def upsert_file(
     caption: str,
     file_type: str,
     category: str | None = None,
+    title: str | None = None,
+    keywords: list[str] | None = None,
 ):
     clean_caption = caption or ""
-    embedding_text = f"Filename: {file_name}. Description: {clean_caption}"
-    vector = get_vector(embedding_text, is_query=False)
+    effective_title = title or file_name
+    norm_category = category.lower().strip() if category else None
+    enriched = build_enriched_text(clean_caption, effective_title, norm_category, keywords)
+    vector = get_vector(enriched, is_query=False)
 
     stmt = select(FileItem).where(FileItem.file_unique_id == file_unique_id)
     result = await session.execute(stmt)
@@ -97,15 +102,21 @@ async def upsert_file(
         existing_item.type = file_type
         existing_item.embedding = vector
         if category is not None:
-            existing_item.category = category
+            existing_item.category = norm_category
+        if title is not None:
+            existing_item.title = title
+        if keywords is not None:
+            existing_item.keywords = keywords
     else:
         item = FileItem(
             file_id=file_id,
             file_unique_id=file_unique_id,
+            title=title,
             caption=clean_caption,
             type=file_type,
             embedding=vector,
-            category=category,
+            category=norm_category,
+            keywords=keywords,
         )
         session.add(item)
 
@@ -113,12 +124,29 @@ async def upsert_file(
 
 
 async def update_file(
-    session: AsyncSession, item_id: int, caption: str, category: str, file_type: str
+    session: AsyncSession,
+    item_id: int,
+    caption: str,
+    category: str | None,
+    file_type: str,
+    title: str | None = None,
+    keywords: list[str] | None = None,
 ) -> bool:
+    norm_category = category.lower().strip() if category else None
+    enriched = build_enriched_text(caption or "", title, norm_category, keywords)
+    vector = get_vector(enriched, is_query=False)
     stmt = (
         update(FileItem)
         .where(FileItem.id == item_id)
-        .values(caption=caption, category=category, type=file_type)
+        .values(
+            caption=caption,
+            category=norm_category,
+            type=file_type,
+            title=title,
+            keywords=keywords,
+            embedding=vector,
+            updated_at=func.now(),  # Core update() does NOT trigger onupdate
+        )
     )
     result = await session.execute(stmt)
     await session.commit()
@@ -137,6 +165,41 @@ async def get_files_by_category(session: AsyncSession, category: str) -> list[Fi
     stmt = select(FileItem).where(FileItem.category == category)
     result = await session.execute(stmt)
     return result.scalars().all()
+
+
+async def get_all_files(session: AsyncSession) -> list[FileItem]:
+    """Fetch all files ordered by id."""
+    result = await session.execute(select(FileItem).order_by(FileItem.id))
+    return result.scalars().all()
+
+
+async def get_linked_files(session: AsyncSession, knowledge_id: int) -> list[FileItem]:
+    """Return all FileItems explicitly linked to a knowledge entry."""
+    stmt = (
+        select(FileItem)
+        .join(knowledge_file_links, knowledge_file_links.c.file_id == FileItem.id)
+        .where(knowledge_file_links.c.knowledge_id == knowledge_id)
+    )
+    result = await session.execute(stmt)
+    return result.scalars().all()
+
+
+async def set_knowledge_files(
+    session: AsyncSession, knowledge_id: int, file_ids: list[int]
+) -> None:
+    """Replace the full set of linked files for a knowledge entry."""
+    await session.execute(
+        delete(knowledge_file_links).where(
+            knowledge_file_links.c.knowledge_id == knowledge_id
+        )
+    )
+    if file_ids:
+        await session.execute(
+            pg_insert(knowledge_file_links).values(
+                [{"knowledge_id": knowledge_id, "file_id": fid} for fid in file_ids]
+            ).on_conflict_do_nothing()
+        )
+    await session.commit()
 
 
 async def search_knowledge(session: AsyncSession, query: str, limit: int = 3):

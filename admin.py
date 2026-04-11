@@ -103,6 +103,25 @@ if page == "📝 База Знаний":
                 )
                 edit_content = st.text_area("Содержание", value=selected_item.content)
 
+                # File attachments for this knowledge entry
+                async def _get_files_for_link():
+                    async with async_session() as session:
+                        all_f = await repo.get_all_files(session)
+                        linked = await repo.get_linked_files(session, edit_id)
+                        return all_f, linked
+                _all_files, _linked_files = run_async(_get_files_for_link())
+                _linked_ids = [f.id for f in _linked_files]
+                _file_options = {
+                    f.id: f"#{f.id} [{f.category or '—'}] {f.title or (f.caption or '')[:60]}"
+                    for f in _all_files
+                }
+                picked_file_ids = st.multiselect(
+                    "Прикреплённые файлы",
+                    options=list(_file_options.keys()),
+                    default=_linked_ids,
+                    format_func=lambda fid: _file_options.get(fid, str(fid)),
+                )
+
                 c_save, c_del = st.columns(2)
                 with c_save:
                     save_click = st.form_submit_button("💾 Сохранить изменения")
@@ -113,7 +132,7 @@ if page == "📝 База Знаний":
                     kw_list = [kw.strip() for kw in edit_keywords.split(",") if kw.strip()] if edit_keywords else None
                     async def save_logic():
                         async with async_session() as session:
-                            return await repo.update_knowledge(
+                            ok = await repo.update_knowledge(
                                 session,
                                 edit_id,
                                 edit_content,
@@ -121,6 +140,8 @@ if page == "📝 База Знаний":
                                 edit_title or None,
                                 kw_list,
                             )
+                            await repo.set_knowledge_files(session, edit_id, picked_file_ids)
+                            return ok
                     if run_async(save_logic()):
                         st.success("Обновлено!")
                         st.rerun()
@@ -140,20 +161,29 @@ if page == "📝 База Знаний":
 # PAGE 2: FILES
 elif page == "📂 Файлы":
     st.title("Управление Файлами")
-    st.write("Просмотр индексированных файлов.")
+    st.write("Просмотр и редактирование индексированных файлов.")
 
-    async def get_files():
+    async def get_files_admin():
         async with async_session() as session:
-             from sqlalchemy import select
-             from core.models import FileItem
-             result = await session.execute(select(FileItem).limit(100))
-             return result.scalars().all()
+            return await repo.get_all_files(session)
 
-    files = run_async(get_files())
-    
+    files = run_async(get_files_admin())
+
     if files:
+        existing_categories = sorted({f.category for f in files if f.category})
+        if existing_categories:
+            st.caption(f"Существующие категории: {', '.join(existing_categories)}")
+
         df_files = pd.DataFrame([
-            {"id": f.id, "file_unique_id": f.file_unique_id, "caption": f.caption, "category": f.category, "type": f.type}
+            {
+                "id": f.id,
+                "title": f.title or "",
+                "caption": (f.caption or "")[:80] + ("…" if f.caption and len(f.caption) > 80 else ""),
+                "category": f.category or "",
+                "keywords": ", ".join(f.keywords) if f.keywords else "",
+                "type": f.type or "",
+                "updated_at": f.updated_at.strftime("%d.%m.%Y %H:%M") if f.updated_at else "—",
+            }
             for f in files
         ])
         st.dataframe(df_files, use_container_width=True)
@@ -167,15 +197,22 @@ elif page == "📂 Файлы":
         if selected_file:
             with st.form("edit_file_form"):
                 st.write(f"Редактирование Файла ID: {edit_file_id}")
-                
-                # Handle None values gracefully
-                curr_caption = selected_file.caption if selected_file.caption is not None else ""
-                curr_category = selected_file.category if selected_file.category is not None else ""
-                curr_type = selected_file.type if selected_file.type is not None else ""
 
-                edit_caption = st.text_input("Описание (Caption)", value=curr_caption)
-                edit_category = st.text_input("Категория (Category)", value=curr_category)
-                edit_type = st.text_input("Тип (Type)", value=curr_type)
+                curr_caption = selected_file.caption or ""
+                curr_category = selected_file.category or ""
+                curr_type = selected_file.type or "document"
+
+                edit_title = st.text_input("Название (Title)", value=selected_file.title or "")
+                edit_caption = st.text_area("Описание (Caption)", value=curr_caption)
+                edit_category = st.text_input("Категория", value=curr_category)
+                edit_keywords = st.text_input(
+                    "Ключевые слова (через запятую)",
+                    value=", ".join(selected_file.keywords) if selected_file.keywords else "",
+                )
+                edit_type = st.selectbox(
+                    "Тип", options=["document", "photo"],
+                    index=0 if curr_type == "document" else 1,
+                )
 
                 c_save, c_del = st.columns(2)
                 with c_save:
@@ -184,11 +221,19 @@ elif page == "📂 Файлы":
                     del_file_click = st.form_submit_button("🗑 Удалить файл", type="primary")
 
                 if save_file_click:
+                    kw_list = [kw.strip() for kw in edit_keywords.split(",") if kw.strip()] or None
                     async def save_file_logic():
                         async with async_session() as session:
-                            return await repo.update_file(session, edit_file_id, edit_caption, edit_category, edit_type)
+                            return await repo.update_file(
+                                session, edit_file_id,
+                                caption=edit_caption,
+                                category=edit_category or None,
+                                file_type=edit_type,
+                                title=edit_title or None,
+                                keywords=kw_list,
+                            )
                     if run_async(save_file_logic()):
-                        st.success("Файл обновлён!")
+                        st.success("Файл обновлён! Эмбеддинг пересчитан.")
                         st.rerun()
                     else:
                         st.error("Ошибка при обновлении файла.")
@@ -272,7 +317,7 @@ elif page == "🧠 Лаборатория":
                 async with async_session() as session:
 
                     knowledge_with_score = await repo.search_knowledge(session, query, limit=3)
-                    
+
                     context_items = []
                     st.subheader("Найденный контекст:")
                     for item, dist in knowledge_with_score:
@@ -280,9 +325,38 @@ elif page == "🧠 Лаборатория":
                         cols[0].metric("Distance", f"{dist:.4f}")
                         cols[1].info(f"**[{item.category}]** {item.content}")
                         context_items.append(item.content)
-                    
+
                     context = "\n".join(context_items)
-                    
+
+                    # File search diagnostics
+                    st.subheader("Файлы (vector search)")
+                    file_hits = await repo.search_files(session, query, limit=5)
+                    if file_hits:
+                        for file_item, dist in file_hits:
+                            keywords_hit = [
+                                k for k in (file_item.keywords or [])
+                                if k.lower() in query.lower()
+                            ]
+                            cols = st.columns([1, 3, 2])
+                            cols[0].metric("Distance", f"{dist:.4f}")
+                            cols[1].info(
+                                f"**[{file_item.category or '—'}]** "
+                                f"{file_item.title or file_item.caption or '(no description)'}"
+                            )
+                            cols[2].write(
+                                f"✅ kw: {keywords_hit}" if keywords_hit else "⛔ no keyword match"
+                            )
+                        if len(file_hits) > 1:
+                            top_dist = file_hits[0][1]
+                            second_dist = file_hits[1][1]
+                            gap = second_dist - top_dist
+                            st.caption(
+                                f"Gap top→second: {gap:.4f} "
+                                f"({'✅ ≥0.05' if gap >= 0.05 else '⛔ <0.05 — ambiguous'})"
+                            )
+                    else:
+                        st.info("Файлы не найдены.")
+
                     st.write("🤖 Генерация ответа AI...")
                     response = await get_ai_answer(query, context)
                     return response
