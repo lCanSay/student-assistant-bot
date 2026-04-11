@@ -25,6 +25,8 @@ services:
       - .env
     environment:
       - DB_HOST=db
+    volumes:
+      - ./:/app
     depends_on:
       db:
         condition: service_healthy

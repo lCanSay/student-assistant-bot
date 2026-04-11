@@ -23,6 +23,38 @@ router = Router()
 
 _VALID_QUERY_RE = re.compile(r'[a-zA-Zа-яА-ЯёЁәғқңөұүһіӘҒҚҢӨҰҮҺІ]')
 
+_MAX_FALLBACK_DISTANCE = 0.20
+_MIN_GAP = 0.05
+
+
+def _filter_fallback_files(candidates: list, user_text: str) -> list:
+    """Return at most one file that passes all three gates:
+    1. At least one file keyword is a substring of the user query
+    2. Distance ≤ _MAX_FALLBACK_DISTANCE
+    3. Clear-winner gap vs second keyword-matching candidate ≥ _MIN_GAP
+
+    Keyword gate runs first so that no-keyword noise files cannot block a
+    real match via the gap check.
+    """
+    if not candidates:
+        return []
+    query_lower = user_text.lower()
+    # Keep only candidates whose keywords overlap the query
+    kw_matched = [
+        (f, d) for f, d in candidates
+        if (f.keywords or []) and any(k.lower() in query_lower for k in f.keywords)
+    ]
+    if not kw_matched:
+        return []
+    top, top_dist = kw_matched[0]
+    if top_dist > _MAX_FALLBACK_DISTANCE:
+        return []
+    if len(kw_matched) > 1:
+        _, second_dist = kw_matched[1]
+        if second_dist - top_dist < _MIN_GAP:
+            return []  # ambiguous among keyword-matching files
+    return [top]
+
 
 def _is_valid_query(text: str) -> bool:
     """Return True if the text looks like a real user question."""
@@ -73,12 +105,27 @@ async def ai_chat_handler(message: Message):
                 context_parts.append(item.content)
         context = "\n\n---\n\n".join(context_parts)
 
-        found_files_with_score = await repo.search_files(session, user_text, limit=3)
+        # --- Curated attachments (primary path) ---
+        # Files linked explicitly to matched knowledge entries are always sent.
+        curated_files: list = []
+        seen_file_ids: set[int] = set()
+        for item, _ in knowledge_items:
+            for f in await repo.get_linked_files(session, item.id):
+                if f.id not in seen_file_ids:
+                    curated_files.append(f)
+                    seen_file_ids.add(f.id)
 
-        valid_files = []
-        # for file_item, distance in found_files_with_score: TODO uncomment later
-        #     if distance <= 0.2:
-        #         valid_files.append(file_item)
+        # --- File vector search (always runs; strict 3-gate filter) ---
+        # Returns at most one file. Runs even when knowledge matched so that
+        # a clearly-relevant file isn't silently dropped because an unrelated
+        # knowledge entry absorbed the query.
+        file_candidates = await repo.search_files(session, user_text, limit=5)
+        fallback_files = [
+            f for f in _filter_fallback_files(file_candidates, user_text)
+            if f.id not in seen_file_ids
+        ]
+
+        valid_files = curated_files + fallback_files
 
         # --- No context found: respond without consuming quota or LLM ---
         if not context:

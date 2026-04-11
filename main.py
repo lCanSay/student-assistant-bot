@@ -27,11 +27,14 @@ async def main():
     async with engine.begin() as conn:
         await conn.execute(text("CREATE EXTENSION IF NOT EXISTS vector"))
         await conn.run_sync(Base.metadata.create_all)
-        # Idempotent migrations: add new columns to knowledge_base if missing
+        # Idempotent migrations: add new columns where missing
         for stmt in [
             "ALTER TABLE knowledge_base ADD COLUMN IF NOT EXISTS title VARCHAR(255)",
             "ALTER TABLE knowledge_base ADD COLUMN IF NOT EXISTS keywords TEXT[]",
             "ALTER TABLE knowledge_base ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ",
+            "ALTER TABLE files ADD COLUMN IF NOT EXISTS title VARCHAR(255)",
+            "ALTER TABLE files ADD COLUMN IF NOT EXISTS keywords TEXT[]",
+            "ALTER TABLE files ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ",
         ]:
             await conn.execute(text(stmt))
     print("Database tables ready.")
