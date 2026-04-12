@@ -13,4 +13,5 @@ aiofiles
 streamlit
 pandas
 cachetools
+prometheus-client
 playwright

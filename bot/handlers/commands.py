@@ -5,11 +5,13 @@ from bot.keyboards import get_main_keyboard
 
 from core.database import async_session
 import services.repo as repo
+from services.metrics import REQUESTS_TOTAL
 
 router = Router()
 
 @router.message(Command("start"))
 async def cmd_start(message: Message):
+    REQUESTS_TOTAL.labels(handler="start").inc()
     # Register user
     async with async_session() as session:
         await repo.get_or_create_user(

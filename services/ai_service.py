@@ -1,4 +1,5 @@
 import logging
+import time
 
 from groq import (
     AsyncGroq,
@@ -9,6 +10,7 @@ from groq import (
 )
 
 from config import GROQ_API_KEY
+from services.metrics import LLM_FALLBACK_TOTAL, LLM_MODEL_USED, LLM_REQUEST_DURATION
 
 logger = logging.getLogger(__name__)
 
@@ -88,6 +90,7 @@ async def get_ai_answer(user_question: str, context: str) -> str:
 
     last_error: Exception | None = None
     for model in MODELS:
+        start = time.perf_counter()
         try:
             completion = await client.chat.completions.create(
                 messages=messages,
@@ -95,14 +98,20 @@ async def get_ai_answer(user_question: str, context: str) -> str:
                 temperature=0.3,
                 max_tokens=1024,
             )
+            elapsed = time.perf_counter() - start
+            LLM_REQUEST_DURATION.labels(model=model, status="success").observe(elapsed)
+            LLM_MODEL_USED.labels(model=model).inc()
             if model != MODELS[0]:
                 logger.warning("Answered via fallback model %s", model)
             return completion.choices[0].message.content
         except _TRANSIENT_ERRORS as e:
+            elapsed = time.perf_counter() - start
+            LLM_REQUEST_DURATION.labels(model=model, status="transient_error").observe(elapsed)
+            LLM_FALLBACK_TOTAL.labels(model=model, error_type=type(e).__name__).inc()
             last_error = e
             logger.warning(
-                "Model %s failed with transient error %s: %s; trying next",
-                model, type(e).__name__, e,
+                "Model %s failed with %s after %.2fs: %s; trying next",
+                model, type(e).__name__, elapsed, e,
             )
             continue
         # Any other groq exception (BadRequest, Authentication, NotFound, ...)

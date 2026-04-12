@@ -25,6 +25,8 @@ services:
       - .env
     environment:
       - DB_HOST=db
+    ports:
+      - "9100:9100"
     volumes:
       - ./:/app
     depends_on:
@@ -47,3 +49,36 @@ services:
     depends_on:
       bot:
         condition: service_started
+
+  prometheus:
+    image: prom/prometheus:latest
+    container_name: kbtu_prometheus
+    volumes:
+      - ./monitoring/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus_data:/prometheus
+    ports:
+      - "9090:9090"
+    depends_on:
+      - bot
+    restart: unless-stopped
+
+  grafana:
+    image: grafana/grafana:latest
+    container_name: kbtu_grafana
+    environment:
+      - GF_SECURITY_ADMIN_USER=admin
+      - GF_SECURITY_ADMIN_PASSWORD=admin
+      - GF_USERS_ALLOW_SIGN_UP=false
+    volumes:
+      - ./monitoring/grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./monitoring/grafana/dashboards:/var/lib/grafana/dashboards:ro
+      - grafana_data:/var/lib/grafana
+    ports:
+      - "3000:3000"
+    depends_on:
+      - prometheus
+    restart: unless-stopped
+
+volumes:
+  prometheus_data:
+  grafana_data:
