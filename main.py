@@ -46,6 +46,10 @@ async def main():
             await conn.execute(text(stmt))
     logger.info("Database tables ready")
 
+    # Preload embedding model (avoids 30-34 s cold start on first query)
+    from services.embeddings import preload_model
+    preload_model()
+
     # Start Prometheus metrics server
     from services.metrics import start_metrics_server, BOT_INFO
     BOT_INFO.info({"version": "1.0.0"})

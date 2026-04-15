@@ -1,5 +1,6 @@
 import logging
 import time
+from functools import lru_cache
 
 from sentence_transformers import SentenceTransformer
 
@@ -7,20 +8,45 @@ from services.metrics import EMBEDDING_DURATION
 
 logger = logging.getLogger(__name__)
 
-model = None
+MODEL_NAME = 'intfloat/multilingual-e5-base'
+
+# ── Eager model loading ──────────────────────────────────────────────
+# Load the model once at import time so the 30-34 s cold-start penalty
+# is paid during application startup, not on the first user request.
+logger.info("Loading embedding model %s …", MODEL_NAME)
+_model = SentenceTransformer(MODEL_NAME)
+logger.info("Embedding model loaded")
+
+
+# ── LRU cache for repeated queries ──────────────────────────────────
+# Student queries repeat heavily (e.g. "как взять ретейк?"), so an
+# in-memory cache avoids redundant ~100 ms encode() calls.
+_CACHE_SIZE = 512
+
+
+@lru_cache(maxsize=_CACHE_SIZE)
+def _cached_encode(prefixed_text: str) -> tuple[float, ...]:
+    """Encode text and return as a hashable tuple (for LRU cache)."""
+    return tuple(_model.encode(prefixed_text).tolist())
+
 
 def get_vector(text: str, is_query: bool = False) -> list[float]:
-    global model
-    if model is None:
-        logger.info("Loading embedding model (first call, may take 2-5s)...")
-        model = SentenceTransformer('intfloat/multilingual-e5-base')
-        logger.info("Embedding model loaded")
-
     prefix = "query: " if is_query else "passage: "
+    prefixed = prefix + text
+
     start = time.perf_counter()
-    result = model.encode(prefix + text).tolist()
+    result = list(_cached_encode(prefixed))
     EMBEDDING_DURATION.observe(time.perf_counter() - start)
     return result
+
+
+def preload_model() -> None:
+    """Explicit no-op — model is already loaded at import time.
+
+    Kept as a public API so callers (main.py, load_test_server.py)
+    can document intent and trigger the import side-effect.
+    """
+    pass
 
 
 def build_enriched_text(
