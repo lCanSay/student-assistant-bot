@@ -253,6 +253,12 @@ docker compose ps
 docker compose logs db
 ```
 
+To run the full suite of tests, use:
+
+```bash
+python -m pytest -q tests
+```
+
 If `db` is unhealthy, the most common cause is a leftover `./postgres_data`
 volume from a previous run with different credentials — remove it and
 restart.
