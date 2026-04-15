@@ -297,3 +297,4 @@ when `requirements.txt` or the `Dockerfile` changes.
   and quota logic in ~190 readable lines.
 - [services/ai_service.py](services/ai_service.py) — LLM system prompt and
   model fallback chain.
+- [docs/load_testing.md](docs/load_testing.md) — Stress test report and load testing configuration overview.

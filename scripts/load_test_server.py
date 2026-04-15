@@ -45,6 +45,12 @@ async def lifespan(app: FastAPI):
         await conn.execute(text("CREATE EXTENSION IF NOT EXISTS vector"))
         await conn.run_sync(Base.metadata.create_all)
     logger.info("✅ Database ready")
+
+    # Preload embedding model (avoids 30-34 s cold start on first request)
+    from services.embeddings import preload_model
+    preload_model()
+    logger.info("✅ Embedding model ready")
+
     yield
 
 

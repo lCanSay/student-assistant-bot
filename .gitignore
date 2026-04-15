@@ -12,3 +12,4 @@ dropped_items.jsonl
 /postgres_data
 /prometheus_data
 /grafana_data
+/loadtest_results

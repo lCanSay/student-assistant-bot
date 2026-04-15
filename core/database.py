@@ -2,9 +2,15 @@ from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker, Asyn
 from sqlalchemy.orm import DeclarativeBase
 from config import DATABASE_URL
 
-from sqlalchemy.pool import NullPool
-
-engine = create_async_engine(DATABASE_URL, echo=False, poolclass=NullPool)
+engine = create_async_engine(
+    DATABASE_URL,
+    echo=False,
+    pool_size=20,         # keep 20 connections ready
+    max_overflow=10,      # allow 10 more under burst
+    pool_timeout=30,      # wait up to 30 s for a free connection
+    pool_recycle=1800,    # recycle connections every 30 min
+    pool_pre_ping=True,   # verify connections before use
+)
 
 async_session = async_sessionmaker(
     engine,
