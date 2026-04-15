@@ -1,0 +1,63 @@
+services:
+  db:
+    image: ankane/pgvector:latest
+    container_name: kbtu_loadtest_db
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: kbtu_db
+    ports:
+      - "5432:5432"
+    volumes:
+      - ./postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: [ "CMD-SHELL", "pg_isready -U postgres" ]
+      interval: 3s
+      timeout: 3s
+      retries: 10
+
+  loadtest-server:
+    image: kbtu_rag_app:latest
+    container_name: kbtu_loadtest_server
+    command: >
+      bash -c "pip install --quiet fastapi 'uvicorn[standard]' prometheus-client &&
+               python scripts/load_test_server.py"
+    env_file:
+      - .env
+    environment:
+      - DB_HOST=db
+      - MOCK_LLM=${MOCK_LLM:-false}
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./:/app
+    depends_on:
+      db:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')"]
+      interval: 5s
+      timeout: 10s
+      retries: 30
+      start_period: 120s
+
+  locust:
+    image: kbtu_rag_app:latest
+    container_name: kbtu_locust
+    command: >
+      bash -c "pip install --quiet locust &&
+               locust -f scripts/locustfile.py
+               --headless
+               -u ${LOCUST_USERS:-30}
+               -r ${LOCUST_SPAWN_RATE:-5}
+               -t ${LOCUST_DURATION:-2m}
+               --host http://loadtest-server:8000
+               --csv /app/scripts/loadtest_results
+               --html /app/scripts/loadtest_report.html"
+    env_file:
+      - .env
+    volumes:
+      - ./:/app
+    depends_on:
+      loadtest-server:
+        condition: service_healthy
