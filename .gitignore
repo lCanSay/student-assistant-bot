@@ -6,7 +6,6 @@ recon_wsp.py
 /.agent/
 /.claude/
 /.pytest_cache/
-/tests/
 *.log
 test.txt
 dropped_items.jsonl
