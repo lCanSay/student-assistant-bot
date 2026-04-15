@@ -16,11 +16,18 @@ from core.database import engine, Base
 import core.models
 import core.wsp_models
 
-logging.basicConfig(level=logging.INFO)
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s | %(levelname)-8s | %(name)s | %(message)s",
+    datefmt="%Y-%m-%d %H:%M:%S",
+)
+logging.getLogger("sqlalchemy.engine").setLevel(logging.WARNING)
+
+logger = logging.getLogger(__name__)
 
 async def main():
     if not BOT_TOKEN:
-        print("Error: BOT_TOKEN not found in .env file.")
+        logger.error("BOT_TOKEN not found in .env file")
         return
 
     # Ensure database tables exist and migrate schema
@@ -37,7 +44,12 @@ async def main():
             "ALTER TABLE files ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ",
         ]:
             await conn.execute(text(stmt))
-    print("Database tables ready.")
+    logger.info("Database tables ready")
+
+    # Start Prometheus metrics server
+    from services.metrics import start_metrics_server, BOT_INFO
+    BOT_INFO.info({"version": "1.0.0"})
+    start_metrics_server(port=9100)
 
     # Initialize Bot and Dispatcher
     bot = Bot(token=BOT_TOKEN)
@@ -51,8 +63,7 @@ async def main():
 
     dp.message.middleware(ThrottlingMiddleware(ttl=3.0))
 
-
-    print("Starting bot polling...")
+    logger.info("Starting bot polling")
     try:
         await dp.start_polling(bot)
     finally:
@@ -62,4 +73,4 @@ if __name__ == "__main__":
     try:
         asyncio.run(main())
     except (KeyboardInterrupt, SystemExit):
-        print("Bot stopped!")
+        logger.info("Bot stopped")

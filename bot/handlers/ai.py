@@ -9,6 +9,15 @@ from bot.keyboards.feedback import get_feedback_keyboard
 from config import DAILY_LIMIT
 from core.database import async_session
 from services.ai_service import AIConfigError, AllModelsUnavailableError, get_ai_answer
+from services.metrics import (
+    ACTIVE_LLM_REQUESTS,
+    FILE_SEND_ERRORS,
+    KNOWLEDGE_RESULTS,
+    RAG_OUTCOME,
+    REQUESTS_TOTAL,
+    VECTOR_DISTANCE_TOP,
+    track_step,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -75,9 +84,12 @@ async def ai_chat_handler(message: Message):
     Uses RAG (Vector Search) + Groq API + File Sending.
     """
     user_text = message.text or ""
+    REQUESTS_TOTAL.labels(handler="ai_chat").inc()
+    logger.info("Query from user=%d len=%d", message.from_user.id, len(user_text))
 
     # --- Input pre-filter (no DB, no quota) ---
     if not _is_valid_query(user_text):
+        RAG_OUTCOME.labels(outcome="invalid_input").inc()
         await message.answer(
             "Пожалуйста, введите осмысленный вопрос (минимум 3 символа)."
         )
@@ -85,16 +97,28 @@ async def ai_chat_handler(message: Message):
 
     async with async_session() as session:
         # Ensure user exists (in case they didn't press /start)
-        user = await repo.get_or_create_user(
-            session,
-            telegram_id=message.from_user.id,
-            full_name=message.from_user.full_name,
-            username=message.from_user.username,
-        )
+        async with track_step("get_or_create_user"):
+            user = await repo.get_or_create_user(
+                session,
+                telegram_id=message.from_user.id,
+                full_name=message.from_user.full_name,
+                username=message.from_user.username,
+            )
 
         # --- Vector search (no quota consumed yet) ---
-        knowledge_with_score = await repo.search_knowledge(session, user_text, limit=3)
+        async with track_step("search_knowledge"):
+            knowledge_with_score = await repo.search_knowledge(session, user_text, limit=3)
         knowledge_items = [(item, dist) for item, dist in knowledge_with_score if dist <= 0.35]
+
+        KNOWLEDGE_RESULTS.observe(len(knowledge_items))
+        if knowledge_with_score:
+            VECTOR_DISTANCE_TOP.observe(knowledge_with_score[0][1])
+        logger.info(
+            "Knowledge: %d/%d items within threshold, top_dist=%.3f",
+            len(knowledge_items),
+            len(knowledge_with_score),
+            knowledge_with_score[0][1] if knowledge_with_score else -1,
+        )
 
         # Build context: include title as a header when available
         context_parts = []
@@ -109,26 +133,27 @@ async def ai_chat_handler(message: Message):
         # Files linked explicitly to matched knowledge entries are always sent.
         curated_files: list = []
         seen_file_ids: set[int] = set()
-        for item, _ in knowledge_items:
-            for f in await repo.get_linked_files(session, item.id):
-                if f.id not in seen_file_ids:
-                    curated_files.append(f)
-                    seen_file_ids.add(f.id)
+        async with track_step("get_linked_files"):
+            for item, _ in knowledge_items:
+                for f in await repo.get_linked_files(session, item.id):
+                    if f.id not in seen_file_ids:
+                        curated_files.append(f)
+                        seen_file_ids.add(f.id)
 
         # --- File vector search (always runs; strict 3-gate filter) ---
-        # Returns at most one file. Runs even when knowledge matched so that
-        # a clearly-relevant file isn't silently dropped because an unrelated
-        # knowledge entry absorbed the query.
-        file_candidates = await repo.search_files(session, user_text, limit=5)
-        fallback_files = [
-            f for f in _filter_fallback_files(file_candidates, user_text)
-            if f.id not in seen_file_ids
-        ]
+        async with track_step("search_files"):
+            file_candidates = await repo.search_files(session, user_text, limit=5)
+            fallback_files = [
+                f for f in _filter_fallback_files(file_candidates, user_text)
+                if f.id not in seen_file_ids
+            ]
 
         valid_files = curated_files + fallback_files
 
         # --- No context found: respond without consuming quota or LLM ---
         if not context:
+            RAG_OUTCOME.labels(outcome="no_context").inc()
+            logger.info("No context for user=%d, files=%d", message.from_user.id, len(valid_files))
             if valid_files:
                 await message.answer(
                     "ℹ️ Я нашел файлы по вашему запросу, но текстовой справки у меня пока нет."
@@ -145,12 +170,16 @@ async def ai_chat_handler(message: Message):
                     elif file_item.type == "photo":
                         await message.answer_photo(photo=file_item.file_id)
                 except Exception as e:
-                    print(f"Error sending file {file_item.caption}: {e}")
+                    FILE_SEND_ERRORS.inc()
+                    logger.warning("Failed to send file %s: %s", file_item.caption, e)
             return
 
         # --- Context found: NOW consume quota ---
-        allowed = await repo.check_and_increment_quota(session, user)
+        async with track_step("check_quota"):
+            allowed = await repo.check_and_increment_quota(session, user)
         if not allowed:
+            RAG_OUTCOME.labels(outcome="quota_exceeded").inc()
+            logger.info("Quota exceeded user=%d", message.from_user.id)
             await session.refresh(user)
             await message.answer(
                 f"Лимит исчерпан ({DAILY_LIMIT} запросов/24ч). "
@@ -160,40 +189,54 @@ async def ai_chat_handler(message: Message):
 
     # --- Call LLM ---
     wait_msg = await message.answer("⏳ Думаю...")
+    ACTIVE_LLM_REQUESTS.inc()
     try:
-        ai_reply = await get_ai_answer(user_text, context)
+        async with track_step("llm_call"):
+            ai_reply = await get_ai_answer(user_text, context)
+        logger.info("LLM responded len=%d", len(ai_reply))
     except AllModelsUnavailableError as e:
+        RAG_OUTCOME.labels(outcome="all_models_unavailable").inc()
         await _safe_delete(wait_msg)
         await message.answer("⚠️ Серверы сейчас перегружены. Пожалуйста, попробуйте позже.")
         logger.warning("All models unavailable for user %s: %s", message.from_user.id, e)
         return
     except AIConfigError as e:
+        RAG_OUTCOME.labels(outcome="ai_config_error").inc()
         await _safe_delete(wait_msg)
         await message.answer("⚠️ Сервис временно недоступен.")
         logger.error("AI misconfigured: %s", e)
         return
     except Exception:
+        RAG_OUTCOME.labels(outcome="unexpected_error").inc()
         await _safe_delete(wait_msg)
         await message.answer("⚠️ Ошибка обращения к AI серверу.")
         logger.exception("Unexpected AI error for user %s", message.from_user.id)
         return
+    finally:
+        ACTIVE_LLM_REQUESTS.dec()
 
     await _safe_delete(wait_msg)
 
-    async with async_session() as session:
-        interaction_id = await repo.log_interaction(
-            session, message.from_user.id, user_text, ai_reply
-        )
-    await message.answer(
-        ai_reply,
-        reply_markup=get_feedback_keyboard(interaction_id),
-    )
+    async with track_step("log_interaction"):
+        async with async_session() as session:
+            interaction_id = await repo.log_interaction(
+                session, message.from_user.id, user_text, ai_reply
+            )
 
-    for file_item in valid_files:
-        try:
-            if file_item.type == "document":
-                await message.answer_document(document=file_item.file_id)
-            elif file_item.type == "photo":
-                await message.answer_photo(photo=file_item.file_id)
-        except Exception as e:
-            print(f"Error sending file {file_item.caption}: {e}")
+    async with track_step("send_reply"):
+        await message.answer(
+            ai_reply,
+            reply_markup=get_feedback_keyboard(interaction_id),
+        )
+    RAG_OUTCOME.labels(outcome="answered").inc()
+
+    async with track_step("send_files"):
+        for file_item in valid_files:
+            try:
+                if file_item.type == "document":
+                    await message.answer_document(document=file_item.file_id)
+                elif file_item.type == "photo":
+                    await message.answer_photo(photo=file_item.file_id)
+            except Exception as e:
+                FILE_SEND_ERRORS.inc()
+                logger.warning("Failed to send file %s: %s", file_item.caption, e)
