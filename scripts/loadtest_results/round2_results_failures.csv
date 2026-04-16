@@ -1,3 +1,0 @@
-Method,Name,Error,Occurrences
-POST,/test-embed,CatchResponseError('HTTP 0'),1
-POST,/test-search,CatchResponseError('HTTP 0'),1
