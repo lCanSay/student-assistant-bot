@@ -253,7 +253,7 @@ docker compose ps
 docker compose logs db
 ```
 
-To run the full suite of tests, use:
+To run the full suite of tests:
 
 ```bash
 python -m pytest -q tests
