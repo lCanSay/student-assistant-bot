@@ -1,7 +1,10 @@
 import streamlit as st
 import asyncio
+import threading
 import pandas as pd
-from core.database import async_session
+from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker, AsyncSession
+from sqlalchemy.pool import NullPool
+from config import DATABASE_URL
 import services.repo as repo
 from services.ai_service import get_ai_answer
 from dotenv import load_dotenv
@@ -15,13 +18,22 @@ load_dotenv()
 
 st.set_page_config(page_title="RAG Bot Admin", layout="wide")
 
+@st.cache_resource
+def _init_async_runtime():
+    """Create a persistent event loop + DB session factory (survives Streamlit reruns)."""
+    loop = asyncio.new_event_loop()
+    threading.Thread(target=loop.run_forever, daemon=True).start()
+
+    engine = create_async_engine(DATABASE_URL, echo=False, poolclass=NullPool)
+    session_factory = async_sessionmaker(
+        engine, class_=AsyncSession, expire_on_commit=False, autoflush=False,
+    )
+    return loop, session_factory
+
+_loop, async_session = _init_async_runtime()
+
 def run_async(coro):
-    try:
-        return asyncio.run(coro)
-    except RuntimeError:
-        loop = asyncio.new_event_loop()
-        asyncio.set_event_loop(loop)
-        return loop.run_until_complete(coro)
+    return asyncio.run_coroutine_threadsafe(coro, _loop).result()
 
 # Sidebar
 st.sidebar.title("Admin Panel")
@@ -312,89 +324,100 @@ elif page == "🧠 Лаборатория":
     if st.button("Искать и Генерировать"):
         if query:
             st.write("🔎 Поиск в базе знаний...")
-            
-            async def test_logic():
+
+            from bot.handlers.ai import (
+                _filter_fallback_files,
+                _MAX_FALLBACK_DISTANCE,
+                _MIN_GAP,
+            )
+
+            async def fetch_playground_data():
                 async with async_session() as session:
-
                     knowledge_with_score = await repo.search_knowledge(session, query, limit=3)
+                    knowledge_results = [
+                        (item.category, item.content, dist)
+                        for item, dist in knowledge_with_score
+                    ]
+                    context = "\n".join(item.content for item, dist in knowledge_with_score)
 
-                    context_items = []
-                    st.subheader("Найденный контекст:")
-                    for item, dist in knowledge_with_score:
-                        cols = st.columns([1, 4])
-                        cols[0].metric("Distance", f"{dist:.4f}")
-                        cols[1].info(f"**[{item.category}]** {item.content}")
-                        context_items.append(item.content)
+                    file_hits_raw = await repo.search_files(session, query, limit=5)
+                    file_results = [
+                        (f.id, f.title, f.caption, f.category, f.keywords, dist)
+                        for f, dist in file_hits_raw
+                    ]
 
-                    context = "\n".join(context_items)
+                    selected_files = _filter_fallback_files(file_hits_raw, query)
+                    selected_info = None
+                    if selected_files:
+                        sf = selected_files[0]
+                        selected_info = (sf.id, sf.title or sf.caption)
 
-                    # File search diagnostics
-                    st.subheader("Файлы (vector search)")
-                    from bot.handlers.ai import (
-                        _filter_fallback_files,
-                        _MAX_FALLBACK_DISTANCE,
-                        _MIN_GAP,
-                    )
-                    file_hits = await repo.search_files(session, query, limit=5)
-                    if file_hits:
-                        for file_item, dist in file_hits:
-                            keywords_hit = [
-                                k for k in (file_item.keywords or [])
-                                if k.lower() in query.lower()
-                            ]
-                            cols = st.columns([1, 3, 2])
-                            cols[0].metric("Distance", f"{dist:.4f}")
-                            cols[1].info(
-                                f"**[{file_item.category or '—'}]** "
-                                f"{file_item.title or file_item.caption or '(no description)'}"
-                            )
-                            cols[2].write(
-                                f"✅ kw: {keywords_hit}" if keywords_hit else "⛔ no keyword match"
-                            )
+                    kw_matched = [
+                        (f.id, dist) for f, dist in file_hits_raw
+                        if (f.keywords or [])
+                        and any(k.lower() in query.lower() for k in f.keywords)
+                    ]
 
-                        # Show the real filter decision (same logic the bot uses)
-                        kw_matched = [
-                            (f, d) for f, d in file_hits
-                            if (f.keywords or [])
-                            and any(k.lower() in query.lower() for k in f.keywords)
-                        ]
-                        selected = _filter_fallback_files(file_hits, query)
-                        if selected:
-                            f = selected[0]
-                            st.success(
-                                f"🎯 Filter selects: **#{f.id} {f.title or f.caption}** "
-                                f"(dist ≤ {_MAX_FALLBACK_DISTANCE})"
-                            )
-                        else:
-                            reasons = []
-                            if not kw_matched:
-                                reasons.append("no file has a keyword in the query")
-                            else:
-                                top_f, top_d = kw_matched[0]
-                                if top_d > _MAX_FALLBACK_DISTANCE:
-                                    reasons.append(
-                                        f"top keyword-match distance {top_d:.4f} > {_MAX_FALLBACK_DISTANCE}"
-                                    )
-                                if len(kw_matched) > 1:
-                                    _, sd = kw_matched[1]
-                                    gap = sd - top_d
-                                    if gap < _MIN_GAP:
-                                        reasons.append(
-                                            f"gap among kw-matched files {gap:.4f} < {_MIN_GAP}"
-                                        )
-                            st.warning(
-                                "⛔ Filter rejects all candidates — "
-                                + "; ".join(reasons or ["(unknown)"])
-                            )
-                    else:
-                        st.info("Файлы не найдены.")
-
-                    st.write("🤖 Генерация ответа AI...")
                     response = await get_ai_answer(query, context)
-                    return response
-            
-            ai_resp = run_async(test_logic())
-            
+                    return knowledge_results, file_results, selected_info, kw_matched, response
+
+            knowledge_results, file_results, selected_info, kw_matched, ai_resp = run_async(fetch_playground_data())
+
+            # Render knowledge context
+            st.subheader("Найденный контекст:")
+            for category, content, dist in knowledge_results:
+                cols = st.columns([1, 4])
+                cols[0].metric("Distance", f"{dist:.4f}")
+                cols[1].info(f"**[{category}]** {content}")
+
+            # Render file search diagnostics
+            st.subheader("Файлы (vector search)")
+            if file_results:
+                for fid, title, caption, category, keywords, dist in file_results:
+                    keywords_hit = [
+                        k for k in (keywords or [])
+                        if k.lower() in query.lower()
+                    ]
+                    cols = st.columns([1, 3, 2])
+                    cols[0].metric("Distance", f"{dist:.4f}")
+                    cols[1].info(
+                        f"**[{category or '—'}]** "
+                        f"{title or caption or '(no description)'}"
+                    )
+                    cols[2].write(
+                        f"✅ kw: {keywords_hit}" if keywords_hit else "⛔ no keyword match"
+                    )
+
+                if selected_info:
+                    sid, sname = selected_info
+                    st.success(
+                        f"🎯 Filter selects: **#{sid} {sname}** "
+                        f"(dist ≤ {_MAX_FALLBACK_DISTANCE})"
+                    )
+                else:
+                    reasons = []
+                    if not kw_matched:
+                        reasons.append("no file has a keyword in the query")
+                    else:
+                        _, top_d = kw_matched[0]
+                        if top_d > _MAX_FALLBACK_DISTANCE:
+                            reasons.append(
+                                f"top keyword-match distance {top_d:.4f} > {_MAX_FALLBACK_DISTANCE}"
+                            )
+                        if len(kw_matched) > 1:
+                            _, sd = kw_matched[1]
+                            gap = sd - top_d
+                            if gap < _MIN_GAP:
+                                reasons.append(
+                                    f"gap among kw-matched files {gap:.4f} < {_MIN_GAP}"
+                                )
+                    st.warning(
+                        "⛔ Filter rejects all candidates — "
+                        + "; ".join(reasons or ["(unknown)"])
+                    )
+            else:
+                st.info("Файлы не найдены.")
+
             st.subheader("Ответ AI:")
             st.success(ai_resp)
 

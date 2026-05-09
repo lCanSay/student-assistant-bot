@@ -161,7 +161,7 @@ async def ai_chat_handler(message: Message):
             else:
                 await message.answer(
                     "К сожалению, у меня пока нет информации по этому вопросу. "
-                    "Попробуйте переформулировать или обратитесь в деканат."
+                    "Попробуйте переформулировать вопрос."
                 )
             for file_item in valid_files:
                 try:
