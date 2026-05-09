@@ -2,7 +2,7 @@
 
 A Telegram RAG bot that answers KBTU students' questions about academic life: procedures (add/drop, retakes), services (dorms, medical centre), schedules, and documents. Built around a curated knowledge base plus a strict vector-search pipeline that refuses to hallucinate.
 
-**[🎥 Watch the YouTube Demo](YOUR_YOUTUBE_LINK_HERE)**
+**[🎥 Watch the YouTube Demo](https://youtu.be/euBUlwct-Ic)**
 
 ---
 
